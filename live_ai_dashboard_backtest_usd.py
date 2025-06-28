@@ -1,4 +1,3 @@
-
 import ccxt
 import pandas as pd
 import ta
@@ -11,7 +10,7 @@ from sklearn.preprocessing import StandardScaler
 # ========== Load and Train a Simple Model ==========
 def train_dummy_model():
     exchange = ccxt.coinbase()
-    ohlcv = exchange.fetch_ohlcv('BTC/USDT', '1h', limit=200)
+    ohlcv = exchange.fetch_ohlcv('BTC/USDT', '30m', limit=300)
     df = pd.DataFrame(ohlcv, columns=['Timestamp', 'Open', 'High', 'Low', 'Close', 'Volume'])
     df['Timestamp'] = pd.to_datetime(df['Timestamp'], unit='ms')
     df.set_index('Timestamp', inplace=True)
@@ -22,11 +21,12 @@ def train_dummy_model():
     df['RSI'] = ta.momentum.rsi(df['Close'], window=14)
     df['MACD'] = ta.trend.macd(df['Close'])
     df['MACD_Signal'] = ta.trend.macd_signal(df['Close'])
+    df['ATR'] = ta.volatility.average_true_range(df['High'], df['Low'], df['Close'])
 
     df.dropna(inplace=True)
 
     df['Target'] = (df['Close'].shift(-3) > df['Close']).astype(int)
-    X = df[['EMA9', 'EMA21', 'VWAP', 'RSI', 'MACD', 'MACD_Signal']]
+    X = df[['EMA9', 'EMA21', 'VWAP', 'RSI', 'MACD', 'MACD_Signal', 'ATR']]
     y = df['Target']
 
     scaler = StandardScaler()
@@ -42,36 +42,26 @@ exchange = ccxt.coinbase()
 
 # ========== Streamlit App ==========
 st.set_page_config(layout='wide')
-st.title("🔮 Live BTC/USDT AI Dashboard")
+st.title("📈 Enhanced BTC/USDT AI Dashboard")
 
-# Theme toggle
-mode = st.radio("Select Theme:", ("Light", "Dark"), horizontal=True)
+# Set fixed theme: Dark with gray background
+bg_color = "#2e2e2e"
+text_color = "#ffffff"
 
-# CSS injection
-if mode == "Light":
-    bg_color = "#ffffff"
-    text_color = "#000000"
-else:
-    bg_color = "#0e1117"
-    text_color = "#ffffff"
-
-st.markdown(
-    f"""
+st.markdown(f"""
     <style>
         .main, .block-container {{
             background-color: {bg_color} !important;
             color: {text_color};
         }}
     </style>
-    """,
-    unsafe_allow_html=True
-)
+""", unsafe_allow_html=True)
 
-# Backtest toggle
+# Dashboard mode
 dashboard_mode = st.radio("Mode", ("Live", "Backtest"), horizontal=True)
 
 def get_data():
-    ohlcv = exchange.fetch_ohlcv('BTC/USDT', '1h', limit=100)
+    ohlcv = exchange.fetch_ohlcv('BTC/USDT', '30m', limit=200)
     df = pd.DataFrame(ohlcv, columns=['Timestamp', 'Open', 'High', 'Low', 'Close', 'Volume'])
     df['Timestamp'] = pd.to_datetime(df['Timestamp'], unit='ms')
     df.set_index('Timestamp', inplace=True)
@@ -82,10 +72,11 @@ def get_data():
     df['RSI'] = ta.momentum.rsi(df['Close'], window=14)
     df['MACD'] = ta.trend.macd(df['Close'])
     df['MACD_Signal'] = ta.trend.macd_signal(df['Close'])
+    df['ATR'] = ta.volatility.average_true_range(df['High'], df['Low'], df['Close'])
 
     df.dropna(inplace=True)
 
-    features = ['EMA9', 'EMA21', 'VWAP', 'RSI', 'MACD', 'MACD_Signal']
+    features = ['EMA9', 'EMA21', 'VWAP', 'RSI', 'MACD', 'MACD_Signal', 'ATR']
     df['Prediction'] = model.predict(scaler.transform(df[features]))
 
     return df
@@ -100,7 +91,7 @@ def run_backtest(df):
     total_return = df['Equity'].iloc[-1] - 100
 
     st.metric("📈 Win Rate", f"{win_rate:.2%}")
-    st.metric("💰 Total Return", f"{total_return:.2%}")
+    st.metric("💰 Total Return", f"{total_return:.2f} USD")
 
     fig = go.Figure()
     fig.add_trace(go.Scatter(x=df.index, y=df['Equity'], name="Equity Curve", line=dict(color="green")))
@@ -115,6 +106,7 @@ else:
     placeholder = st.empty()
     while True:
         df = get_data()
+        current_price = df['Close'].iloc[-1]
 
         fig = go.Figure()
         fig.add_trace(go.Scatter(x=df.index, y=df['Close'], name='Close', line=dict(color='black')))
@@ -137,14 +129,25 @@ else:
             marker=dict(size=10, color='red', symbol='triangle-down')
         ))
 
+        fig.add_annotation(
+            xref="paper", yref="paper",
+            x=0, y=1.1, showarrow=False,
+            text=f"<b>Current BTC Price: ${current_price:.2f}</b>",
+            font=dict(size=16, color='white'),
+            bgcolor="black",
+            borderpad=4
+        )
+
         fig.update_layout(
             title='BTC/USDT Price with AI Predictions',
             xaxis_title='Time',
             yaxis_title='Price',
-            height=600,
+            height=700,
             plot_bgcolor=bg_color,
             paper_bgcolor=bg_color,
-            font=dict(color=text_color)
+            font=dict(color=text_color),
+            xaxis=dict(showgrid=True),
+            yaxis=dict(showgrid=True)
         )
 
         placeholder.plotly_chart(fig, use_container_width=True)
