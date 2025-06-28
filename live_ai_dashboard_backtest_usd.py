@@ -1,11 +1,13 @@
+
 import ccxt
 import pandas as pd
 import ta
+import time
 import streamlit as st
 import plotly.graph_objs as go
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.preprocessing import StandardScaler
-from streamlit_autorefresh import st_autorefresh
+from streamlit import experimental_rerun
 
 # ========== Load and Train a Simple Model ==========
 def train_dummy_model():
@@ -46,9 +48,6 @@ exchange = ccxt.coinbase()
 st.set_page_config(layout='wide')
 st.title("📈 Enhanced BTC/USDT AI Dashboard")
 
-# Auto-refresh every 60 seconds
-st_autorefresh(interval=60 * 1000, key="refresh")
-
 # Set fixed theme: Dark with gray background
 bg_color = "#2e2e2e"
 text_color = "#ffffff"
@@ -65,6 +64,7 @@ st.markdown(f"""
     </style>
 """, unsafe_allow_html=True)
 
+# Dashboard mode
 dashboard_mode = st.radio("Mode", ("Live", "Backtest"), horizontal=True)
 
 def get_data():
@@ -90,48 +90,7 @@ def get_data():
 
     return df
 
-def run_backtest(df):
-    df['Future_Close'] = df['Close'].shift(-3)
-    df['Return'] = (df['Future_Close'] - df['Close']) / df['Close']
-    df['Prediction'] = df['Prediction'].astype(float)
-    df['Strategy_Return'] = df['Return'] * df['Prediction']
-    df['Strategy_Return'].fillna(0, inplace=True)
-
-    df['Equity'] = 100 * (1 + df['Strategy_Return']).cumprod()
-
-    valid_trades = df['Prediction'].sum()
-    win_trades = (df['Strategy_Return'] > 0).sum()
-    win_rate = win_trades / valid_trades if valid_trades > 0 else 0
-    total_return = df['Equity'].iloc[-1] - 100
-
-    st.metric("📈 Win Rate", f"{win_rate:.2%}")
-    st.metric("💰 Total Return", f"{total_return:.2f} USD")
-
-    fig = go.Figure()
-    fig.add_trace(go.Scatter(x=df.index, y=df['Equity'], name="Equity Curve", line=dict(color="green")))
-    fig.update_layout(title="Backtest Equity Curve", height=500,
-                      plot_bgcolor=bg_color, paper_bgcolor=bg_color, font=dict(color=text_color))
-    st.plotly_chart(fig, use_container_width=True)
-
-    trades = df[df['Prediction'] == 1][['Close']].copy()
-    trades['Entry Time'] = trades.index
-    trades['Exit Time'] = trades.index + pd.Timedelta(minutes=90)
-    trades['Exit Price'] = df['Close'].shift(-3).loc[trades.index]
-    trades['PnL (%)'] = (trades['Exit Price'] - trades['Close']) / trades['Close'] * 100
-    trades['Position'] = trades['PnL (%)'].apply(lambda x: 'Long' if x >= 0 else 'Short')
-    trades = trades.rename(columns={'Close': 'Entry Price'})
-    trades.sort_values(by='Entry Time', ascending=False, inplace=True)
-
-    trades['PnL (%)'] = trades['PnL (%)'].map(lambda x: f"<span style='color: {'green' if x >= 0 else 'red'}'>{x:.2f}%</span>")
-
-    st.subheader("📅 Backtest Trades")
-    st.markdown(trades[['Entry Time', 'Entry Price', 'Exit Time', 'Exit Price', 'PnL (%)', 'Position']].to_html(escape=False, index=False), unsafe_allow_html=True)
-
-# ==== MAIN LOGIC ====
-if dashboard_mode == "Backtest":
-    df = get_data()
-    run_backtest(df)
-else:
+if dashboard_mode == "Live":
     df = get_data()
     current_price = df['Close'].iloc[-1]
 
@@ -178,3 +137,5 @@ else:
     )
 
     st.plotly_chart(fig, use_container_width=True)
+    time.sleep(60)
+    experimental_rerun()
