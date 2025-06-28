@@ -6,6 +6,7 @@ import streamlit as st
 import plotly.graph_objs as go
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.preprocessing import StandardScaler
+import pytz
 
 # ========== Auto-refresh every 60 seconds ==========
 if 'last_refresh' not in st.session_state:
@@ -51,6 +52,7 @@ def train_dummy_model():
 
 model, scaler = train_dummy_model()
 exchange = ccxt.coinbase()
+est = pytz.timezone('US/Eastern')
 
 # ========== Streamlit Setup ==========
 st.set_page_config(layout='wide')
@@ -77,7 +79,7 @@ dashboard_mode = st.radio("Mode", ("Live", "Backtest"), horizontal=True)
 def get_data(symbol):
     ohlcv = exchange.fetch_ohlcv(symbol, '30m', limit=200)
     df = pd.DataFrame(ohlcv, columns=['Timestamp', 'Open', 'High', 'Low', 'Close', 'Volume'])
-    df['Timestamp'] = pd.to_datetime(df['Timestamp'], unit='ms')
+    df['Timestamp'] = pd.to_datetime(df['Timestamp'], unit='ms').dt.tz_localize('UTC').dt.tz_convert(est)
     df.set_index('Timestamp', inplace=True)
 
     df['EMA9'] = ta.trend.ema_indicator(df['Close'], window=9)
@@ -130,7 +132,7 @@ def run_backtest(df):
     trades.sort_values(by='Entry Time', ascending=False, inplace=True)
     trades['PnL (%)'] = trades['PnL (%)'].map(lambda x: f"<span style='color: {'green' if x >= 0 else 'red'}'>{x:.2f}%</span>" if pd.notna(x) else 'N/A')
 
-    st.subheader("📅 Backtest Trade Log")
+    st.subheader("📅 Backtest Trade Log (EST)")
     st.markdown(trades[['Entry Time', 'Entry Price', 'Exit Time', 'Exit Price', 'PnL (%)', 'Position']].to_html(escape=False, index=False), unsafe_allow_html=True)
 
 # ========== Live Dashboard ==========
