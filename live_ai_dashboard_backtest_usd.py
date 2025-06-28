@@ -7,14 +7,15 @@ import plotly.graph_objs as go
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.preprocessing import StandardScaler
 
-# Auto-refresh setup (every 60 seconds)
+# ========== Auto-refresh every 60 seconds ==========
 if 'last_refresh' not in st.session_state:
     st.session_state.last_refresh = time.time()
 
 refresh_interval = 60  # seconds
+
 if time.time() - st.session_state.last_refresh > refresh_interval:
     st.session_state.last_refresh = time.time()
-    st.experimental_rerun()
+    st.rerun()
 
 # ========== Load and Train Model ==========
 def train_dummy_model():
@@ -51,11 +52,11 @@ def train_dummy_model():
 model, scaler = train_dummy_model()
 exchange = ccxt.coinbase()
 
-# ========== Streamlit App Setup ==========
+# ========== Streamlit Setup ==========
 st.set_page_config(layout='wide')
 st.title("📈 Enhanced BTC/USDT AI Dashboard")
 
-# Fixed dark theme styling
+# Fixed theme
 bg_color = "#2e2e2e"
 text_color = "#ffffff"
 
@@ -71,9 +72,10 @@ st.markdown(f"""
     </style>
 """, unsafe_allow_html=True)
 
-# Mode toggle
+# ========== Mode Toggle ==========
 dashboard_mode = st.radio("Mode", ("Live", "Backtest"), horizontal=True)
 
+# ========== Fetch Live Data ==========
 def get_data():
     ohlcv = exchange.fetch_ohlcv('BTC/USDT', '30m', limit=200)
     df = pd.DataFrame(ohlcv, columns=['Timestamp', 'Open', 'High', 'Low', 'Close', 'Volume'])
@@ -97,11 +99,11 @@ def get_data():
 
     return df
 
+# ========== Backtest ==========
 def run_backtest(df):
     df['Future_Close'] = df['Close'].shift(-3)
     df['Return'] = (df['Future_Close'] - df['Close']) / df['Close']
     df['Prediction'] = df['Prediction'].astype(float)
-
     df['Strategy_Return'] = df['Return'] * df['Prediction']
     df['Strategy_Return'].fillna(0, inplace=True)
     df['Equity'] = 100 * (1 + df['Strategy_Return']).cumprod()
@@ -127,26 +129,15 @@ def run_backtest(df):
     trades['PnL (%)'] = (trades['Exit Price'] - trades['Close']) / trades['Close'] * 100
     trades['Position'] = trades['PnL (%)'].apply(lambda x: 'Long' if x >= 0 else 'Short')
     trades = trades.rename(columns={'Close': 'Entry Price'})
+    trades.sort_values(by='Entry Time', ascending=False, inplace=True)
 
-    # Enforce 2 hour minimum interval between entries
-    trades = trades.sort_values(by='Entry Time', ascending=False)
-    filtered_trades = []
-    last_entry_time = pd.Timestamp.min
-
-    for _, row in trades.iterrows():
-        if (row['Entry Time'] - last_entry_time) >= pd.Timedelta(hours=2):
-            filtered_trades.append(row)
-            last_entry_time = row['Entry Time']
-
-    trades = pd.DataFrame(filtered_trades)
-
-    trades['PnL (%)'] = trades['PnL (%)'].map(
-        lambda x: f"<span style='color: {'green' if x >= 0 else 'red'}'>{x:.2f}%</span>")
+    # Color PnL
+    trades['PnL (%)'] = trades['PnL (%)'].map(lambda x: f"<span style='color: {'green' if x >= 0 else 'red'}'>{x:.2f}%</span>")
 
     st.subheader("📅 Backtest Trades")
     st.markdown(trades[['Entry Time', 'Entry Price', 'Exit Time', 'Exit Price', 'PnL (%)', 'Position']].to_html(escape=False, index=False), unsafe_allow_html=True)
 
-# Run app
+# ========== App Mode ==========
 if dashboard_mode == "Backtest":
     df = get_data()
     run_backtest(df)
