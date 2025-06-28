@@ -1,27 +1,14 @@
-
-# This is a corrected version with:
-# ✅ Stop-loss at 2%
-# ✅ Take-profit at 4%
-# ✅ Fixed equity curve updates
-# ✅ Accurate entry/exit tracking
-
 import ccxt
 import pandas as pd
 import ta
 import streamlit as st
 import plotly.graph_objs as go
+import time
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.preprocessing import StandardScaler
 
-st.set_page_config(layout='wide')
-st.title("📊 BTC AI Dashboard with SL/TP")
-
-# ===== Parameters =====
-STOP_LOSS_PCT = 0.02  # 2%
-TAKE_PROFIT_PCT = 0.04  # 4%
-BASE_CAPITAL = 100
-
-# ===== Model Training =====
+# ========== Model Training ==========
+@st.cache_resource
 def train_model():
     exchange = ccxt.coinbase()
     ohlcv = exchange.fetch_ohlcv('BTC/USDT', '30m', limit=300)
@@ -32,151 +19,151 @@ def train_model():
     df['EMA9'] = ta.trend.ema_indicator(df['Close'], window=9)
     df['EMA21'] = ta.trend.ema_indicator(df['Close'], window=21)
     df['VWAP'] = ta.volume.volume_weighted_average_price(df['High'], df['Low'], df['Close'], df['Volume'])
-    df['RSI'] = ta.momentum.rsi(df['Close'])
+    df['RSI'] = ta.momentum.rsi(df['Close'], window=14)
     df['MACD'] = ta.trend.macd(df['Close'])
     df['MACD_Signal'] = ta.trend.macd_signal(df['Close'])
     df['ATR'] = ta.volatility.average_true_range(df['High'], df['Low'], df['Close'])
     df['ROC'] = ta.momentum.roc(df['Close'], window=5)
     df['OBV'] = ta.volume.on_balance_volume(df['Close'], df['Volume'])
-
     df.dropna(inplace=True)
-    df['Target'] = (df['Close'].shift(-3) > df['Close']).astype(int)
 
+    df['Target'] = (df['Close'].shift(-3) > df['Close']).astype(int)
     X = df[['EMA9', 'EMA21', 'VWAP', 'RSI', 'MACD', 'MACD_Signal', 'ATR', 'ROC', 'OBV']]
     y = df['Target']
 
     scaler = StandardScaler()
+    X_scaled = scaler.fit_transform(X)
+
     model = RandomForestClassifier(n_estimators=50)
-    model.fit(scaler.fit_transform(X), y)
+    model.fit(X_scaled, y)
 
     return model, scaler
 
-# ===== Backtest Runner =====
-def run_backtest(df, model, scaler):
-    df['Prediction'] = model.predict(scaler.transform(df[['EMA9', 'EMA21', 'VWAP', 'RSI', 'MACD', 'MACD_Signal', 'ATR', 'ROC', 'OBV']]))
-    df['Signal'] = df['Prediction']
-    trades = []
-    capital = BASE_CAPITAL
-
-    for i in range(len(df) - 5):
-        if df['Signal'].iloc[i] == 1:
-            entry_price = df['Close'].iloc[i]
-            for j in range(1, 6):
-                future_idx = i + j
-                if future_idx >= len(df):
-                    break
-                low = df['Low'].iloc[future_idx]
-                high = df['High'].iloc[future_idx]
-                exit_reason = None
-
-                if low <= entry_price * (1 - STOP_LOSS_PCT):
-                    exit_price = entry_price * (1 - STOP_LOSS_PCT)
-                    exit_time = df.index[future_idx]
-                    exit_reason = 'SL'
-                    break
-                elif high >= entry_price * (1 + TAKE_PROFIT_PCT):
-                    exit_price = entry_price * (1 + TAKE_PROFIT_PCT)
-                    exit_time = df.index[future_idx]
-                    exit_reason = 'TP'
-                    break
-            else:
-                exit_price = df['Close'].iloc[i + 5]
-                exit_time = df.index[i + 5]
-                exit_reason = 'Timed'
-
-            pct_return = (exit_price - entry_price) / entry_price
-            capital *= 1 + pct_return
-
-            trades.append({
-                'Entry Time': df.index[i],
-                'Entry Price': entry_price,
-                'Exit Time': exit_time,
-                'Exit Price': exit_price,
-                'PnL (%)': pct_return * 100,
-                'Reason': exit_reason
-            })
-
-    equity_curve = pd.DataFrame(trades)
-    equity_curve['Equity'] = BASE_CAPITAL * (1 + equity_curve['PnL (%)'] / 100).cumprod()
-    return equity_curve
-
-# ===== Main =====
-exchange = ccxt.coinbase()
-ohlcv = exchange.fetch_ohlcv('BTC/USDT', '30m', limit=300)
-df = pd.DataFrame(ohlcv, columns=['Timestamp', 'Open', 'High', 'Low', 'Close', 'Volume'])
-df['Timestamp'] = pd.to_datetime(df['Timestamp'], unit='ms')
-df.set_index('Timestamp', inplace=True)
-
-# Add indicators
-df['EMA9'] = ta.trend.ema_indicator(df['Close'], window=9)
-df['EMA21'] = ta.trend.ema_indicator(df['Close'], window=21)
-df['VWAP'] = ta.volume.volume_weighted_average_price(df['High'], df['Low'], df['Close'], df['Volume'])
-df['RSI'] = ta.momentum.rsi(df['Close'])
-df['MACD'] = ta.trend.macd(df['Close'])
-df['MACD_Signal'] = ta.trend.macd_signal(df['Close'])
-df['ATR'] = ta.volatility.average_true_range(df['High'], df['Low'], df['Close'])
-df['ROC'] = ta.momentum.roc(df['Close'], window=5)
-df['OBV'] = ta.volume.on_balance_volume(df['Close'], df['Volume'])
-df.dropna(inplace=True)
-
 model, scaler = train_model()
-equity = run_backtest(df.copy(), model, scaler)
+exchange = ccxt.coinbase()
+st.set_page_config(layout="wide")
+st.title("📊 BTC/USDT AI Dashboard")
 
-# ===== Display =====
-st.subheader("Backtest Equity Curve (SL 2%, TP 4%)")
-fig = go.Figure()
-fig.add_trace(go.Scatter(x=equity['Exit Time'], y=equity['Equity'], mode='lines+markers', name='Equity', line=dict(color='green')))
-st.plotly_chart(fig, use_container_width=True)
+# Styling
+st.markdown("""
+<style>
+    .main, .block-container { background-color: #1e1e1e !important; color: white; }
+</style>
+""", unsafe_allow_html=True)
 
-st.subheader("Trades")
-equity['PnL (%)'] = equity['PnL (%)'].apply(lambda x: f"📈 <span style='color:green'>{x:.2f}%</span>" if float(x) > 0 else f"📉 <span style='color:red'>{x:.2f}%</span>")
-st.markdown(equity.to_html(escape=False, index=False), unsafe_allow_html=True)
-else:
-    placeholder = st.empty()
-    df = get_data()
+# ========== Load Data ==========
+def get_data():
+    ohlcv = exchange.fetch_ohlcv('BTC/USDT', '30m', limit=300)
+    df = pd.DataFrame(ohlcv, columns=['Timestamp', 'Open', 'High', 'Low', 'Close', 'Volume'])
+    df['Timestamp'] = pd.to_datetime(df['Timestamp'], unit='ms')
+    df.set_index('Timestamp', inplace=True)
+
+    df['EMA9'] = ta.trend.ema_indicator(df['Close'], window=9)
+    df['EMA21'] = ta.trend.ema_indicator(df['Close'], window=21)
+    df['VWAP'] = ta.volume.volume_weighted_average_price(df['High'], df['Low'], df['Close'], df['Volume'])
+    df['RSI'] = ta.momentum.rsi(df['Close'], window=14)
+    df['MACD'] = ta.trend.macd(df['Close'])
+    df['MACD_Signal'] = ta.trend.macd_signal(df['Close'])
+    df['ATR'] = ta.volatility.average_true_range(df['High'], df['Low'], df['Close'])
+    df['ROC'] = ta.momentum.roc(df['Close'], window=5)
+    df['OBV'] = ta.volume.on_balance_volume(df['Close'], df['Volume'])
+    df.dropna(inplace=True)
+
+    features = ['EMA9', 'EMA21', 'VWAP', 'RSI', 'MACD', 'MACD_Signal', 'ATR', 'ROC', 'OBV']
+    df['Prediction'] = model.predict(scaler.transform(df[features]))
+
+    return df
+
+# ========== Backtest ==========
+def run_backtest(df):
+    entry_times = []
+    equity = [100]
+    capital = 100
+    last_trade_time = df.index[0] - pd.Timedelta(hours=2)
+    trades = []
+
+    for i in range(len(df) - 1):
+        now = df.index[i]
+        if df['Prediction'].iloc[i] == 1 and now - last_trade_time >= pd.Timedelta(hours=2):
+            entry_price = df['Close'].iloc[i]
+            tp_price = entry_price * 1.04
+            sl_price = entry_price * 0.98
+
+            exit_price = None
+            exit_time = None
+
+            for j in range(i + 1, min(i + 10, len(df))):  # check next 5 candles
+                high = df['High'].iloc[j]
+                low = df['Low'].iloc[j]
+                exit_index = df.index[j]
+
+                if high >= tp_price:
+                    exit_price = tp_price
+                    exit_time = exit_index
+                    break
+                elif low <= sl_price:
+                    exit_price = sl_price
+                    exit_time = exit_index
+                    break
+
+            if exit_price is None:
+                exit_price = df['Close'].iloc[min(i + 3, len(df) - 1)]
+                exit_time = df.index[min(i + 3, len(df) - 1)]
+
+            pnl = (exit_price - entry_price) / entry_price
+            capital *= (1 + pnl)
+            equity.append(capital)
+            entry_times.append(now)
+            trades.append({
+                'Entry Time': now,
+                'Exit Time': exit_time,
+                'Entry Price': entry_price,
+                'Exit Price': exit_price,
+                'PnL (%)': pnl * 100,
+                'Type': 'Long'
+            })
+            last_trade_time = now
+
+    equity_df = pd.Series(equity, index=[df.index[0]] + entry_times)
+    trades_df = pd.DataFrame(trades)
+    return equity_df, trades_df
+
+# ========== Display Tabs ==========
+mode = st.radio("Mode", ["Live", "Backtest"], horizontal=True)
+
+df = get_data()
+
+if mode == "Live":
     current_price = df['Close'].iloc[-1]
+    st.markdown(f"### 💰 Current BTC/USDT: **${current_price:.2f}**")
 
     fig = go.Figure()
-    fig.add_trace(go.Scatter(x=df.index, y=df['Close'], name='Close', line=dict(color='black')))
+    fig.add_trace(go.Scatter(x=df.index, y=df['Close'], name='Close', line=dict(color='white')))
     fig.add_trace(go.Scatter(x=df.index, y=df['EMA9'], name='EMA9', line=dict(color='blue', dash='dot')))
     fig.add_trace(go.Scatter(x=df.index, y=df['EMA21'], name='EMA21', line=dict(color='orange', dash='dot')))
     fig.add_trace(go.Scatter(x=df.index, y=df['VWAP'], name='VWAP', line=dict(color='purple', dash='dot')))
 
-    long_signals = df[df['Prediction'] == 1]
-    short_signals = df[df['Prediction'] == 0]
+    signals = df[df['Prediction'] == 1]
+    fig.add_trace(go.Scatter(x=signals.index, y=signals['Close'], mode='markers', name='Long', marker=dict(color='green', symbol='triangle-up', size=10)))
 
-    fig.add_trace(go.Scatter(
-        x=long_signals.index, y=long_signals['Close'],
-        mode='markers', name='📈 Long Signal',
-        marker=dict(size=10, color='green', symbol='triangle-up')
-    ))
+    fig.update_layout(height=600, plot_bgcolor="#1e1e1e", paper_bgcolor="#1e1e1e", font=dict(color='white'))
+    st.plotly_chart(fig, use_container_width=True)
 
-    fig.add_trace(go.Scatter(
-        x=short_signals.index, y=short_signals['Close'],
-        mode='markers', name='📉 Short Signal',
-        marker=dict(size=10, color='red', symbol='triangle-down')
-    ))
+elif mode == "Backtest":
+    equity_curve, trades_df = run_backtest(df)
 
-    fig.add_annotation(
-        xref="paper", yref="paper",
-        x=0, y=1.1, showarrow=False,
-        text=f"<b>Current BTC Price: ${current_price:.2f}</b>",
-        font=dict(size=16, color='white'),
-        bgcolor="black",
-        borderpad=4
-    )
+    st.subheader("📈 Equity Curve with Entries & Exits")
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(x=equity_curve.index, y=equity_curve, name='Equity Curve', line=dict(color='green')))
+    fig.add_trace(go.Scatter(x=trades_df['Entry Time'], y=trades_df['Entry Price'], mode='markers', name='Long Entry', marker=dict(color='green', symbol='triangle-up')))
+    fig.add_trace(go.Scatter(x=trades_df['Exit Time'], y=trades_df['Exit Price'], mode='markers', name='Exit', marker=dict(color='white', symbol='x')))
 
-    fig.update_layout(
-        title='BTC/USDT Price with AI Predictions',
-        xaxis_title='Time',
-        yaxis_title='Price',
-        height=700,
-        plot_bgcolor=bg_color,
-        paper_bgcolor=bg_color,
-        font=dict(color=text_color),
-        xaxis=dict(showgrid=True),
-        yaxis=dict(showgrid=True)
-    )
+    fig.update_layout(height=600, plot_bgcolor="#1e1e1e", paper_bgcolor="#1e1e1e", font=dict(color='white'))
+    st.plotly_chart(fig, use_container_width=True)
 
-    placeholder.plotly_chart(fig, use_container_width=True)
+    trades_df['PnL (%)'] = trades_df['PnL (%)'].apply(lambda x: f"<span style='color: {'green' if x >= 0 else 'red'}'>{x:.2f}%</span>")
+    st.markdown("### 📊 Backtest Trades")
+    st.markdown(trades_df[['Entry Time', 'Entry Price', 'Exit Time', 'Exit Price', 'PnL (%)', 'Type']].to_html(escape=False, index=False), unsafe_allow_html=True)
 
+    st.metric("Total Trades", len(trades_df))
+    st.metric("Final Equity", f"${equity_curve.iloc[-1]:.2f}")
