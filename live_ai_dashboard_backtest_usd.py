@@ -22,11 +22,13 @@ def train_dummy_model():
     df['MACD'] = ta.trend.macd(df['Close'])
     df['MACD_Signal'] = ta.trend.macd_signal(df['Close'])
     df['ATR'] = ta.volatility.average_true_range(df['High'], df['Low'], df['Close'])
+    df['ROC'] = ta.momentum.roc(df['Close'], window=5)
+    df['OBV'] = ta.volume.on_balance_volume(df['Close'], df['Volume'])
 
     df.dropna(inplace=True)
 
     df['Target'] = (df['Close'].shift(-3) > df['Close']).astype(int)
-    X = df[['EMA9', 'EMA21', 'VWAP', 'RSI', 'MACD', 'MACD_Signal', 'ATR']]
+    X = df[['EMA9', 'EMA21', 'VWAP', 'RSI', 'MACD', 'MACD_Signal', 'ATR', 'ROC', 'OBV']]
     y = df['Target']
 
     scaler = StandardScaler()
@@ -54,6 +56,9 @@ st.markdown(f"""
             background-color: {bg_color} !important;
             color: {text_color};
         }}
+        .dataframe th, .dataframe td {{
+            text-align: center !important;
+        }}
     </style>
 """, unsafe_allow_html=True)
 
@@ -73,10 +78,12 @@ def get_data():
     df['MACD'] = ta.trend.macd(df['Close'])
     df['MACD_Signal'] = ta.trend.macd_signal(df['Close'])
     df['ATR'] = ta.volatility.average_true_range(df['High'], df['Low'], df['Close'])
+    df['ROC'] = ta.momentum.roc(df['Close'], window=5)
+    df['OBV'] = ta.volume.on_balance_volume(df['Close'], df['Volume'])
 
     df.dropna(inplace=True)
 
-    features = ['EMA9', 'EMA21', 'VWAP', 'RSI', 'MACD', 'MACD_Signal', 'ATR']
+    features = ['EMA9', 'EMA21', 'VWAP', 'RSI', 'MACD', 'MACD_Signal', 'ATR', 'ROC', 'OBV']
     df['Prediction'] = model.predict(scaler.transform(df[features]))
 
     return df
@@ -110,10 +117,13 @@ def run_backtest(df):
     trades['Exit Time'] = trades.index + pd.Timedelta(minutes=90)
     trades['Exit Price'] = df['Close'].shift(-3).loc[trades.index]
     trades['PnL (%)'] = (trades['Exit Price'] - trades['Close']) / trades['Close'] * 100
+    trades['Position'] = trades['PnL (%)'].apply(lambda x: 'Long' if x >= 0 else 'Short')
     trades = trades.rename(columns={'Close': 'Entry Price'})
 
+    trades['PnL (%)'] = trades['PnL (%)'].map(lambda x: f"<span style='color: {'green' if x >= 0 else 'red'}'>{x:.2f}%</span>")
+
     st.subheader("📅 Backtest Trades")
-    st.dataframe(trades[['Entry Time', 'Entry Price', 'Exit Time', 'Exit Price', 'PnL (%)']])
+    st.markdown(trades[['Entry Time', 'Entry Price', 'Exit Time', 'Exit Price', 'PnL (%)', 'Position']].to_html(escape=False, index=False), unsafe_allow_html=True)
 
 if dashboard_mode == "Backtest":
     df = get_data()
