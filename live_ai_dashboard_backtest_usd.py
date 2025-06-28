@@ -112,7 +112,9 @@ def run_backtest(df):
                       plot_bgcolor=bg_color, paper_bgcolor=bg_color, font=dict(color=text_color))
     st.plotly_chart(fig, use_container_width=True)
 
-    trades = df[df['Prediction'] == 1][['Close']].copy()
+    trades = df[df['Prediction'] == 1].copy()
+    trades = trades[trades.index.to_series().diff().gt(pd.Timedelta(hours=2)).fillna(True)]
+    trades = trades[['Close']]
     trades['Entry Time'] = trades.index
     trades['Exit Time'] = trades.index + pd.Timedelta(minutes=90)
     trades['Exit Price'] = df['Close'].shift(-3).loc[trades.index]
