@@ -12,8 +12,7 @@ import pytz
 if 'last_refresh' not in st.session_state:
     st.session_state.last_refresh = time.time()
 
-refresh_interval = 60  # seconds
-
+refresh_interval = 60
 if time.time() - st.session_state.last_refresh > refresh_interval:
     st.session_state.last_refresh = time.time()
     st.rerun()
@@ -26,7 +25,6 @@ def train_dummy_model():
     df['Timestamp'] = pd.to_datetime(df['Timestamp'], unit='ms')
     df.set_index('Timestamp', inplace=True)
 
-    # Indicators
     df['EMA9'] = ta.trend.ema_indicator(df['Close'], window=9)
     df['EMA21'] = ta.trend.ema_indicator(df['Close'], window=21)
     df['VWAP'] = ta.volume.volume_weighted_average_price(df['High'], df['Low'], df['Close'], df['Volume'])
@@ -39,7 +37,7 @@ def train_dummy_model():
 
     df.dropna(inplace=True)
 
-    # 3-class Target
+    # 3-class target
     df['Return_3'] = (df['Close'].shift(-3) - df['Close']) / df['Close']
     df['Target'] = df['Return_3'].apply(lambda x: 2 if x > 0.0025 else (0 if x < -0.0025 else 1))
 
@@ -58,7 +56,7 @@ model, scaler = train_dummy_model()
 exchange = ccxt.coinbase()
 est = pytz.timezone('US/Eastern')
 
-# ========== Streamlit Setup ==========
+# ========== Streamlit UI ==========
 st.set_page_config(layout='wide')
 st.title("📈 Enhanced AI Dashboard: BTC, SOL, ETH")
 
@@ -106,11 +104,9 @@ def get_data(symbol):
 def run_backtest(df, title):
     df['Future_Close'] = df['Close'].shift(-3)
     df['Return'] = (df['Future_Close'] - df['Close']) / df['Close']
-
     df['Strategy_Return'] = 0.0
     df.loc[df['Prediction'] == 2, 'Strategy_Return'] = df['Return']
     df.loc[df['Prediction'] == 0, 'Strategy_Return'] = -df['Return']
-
     df['Equity'] = 100 * (1 + df['Strategy_Return'].fillna(0)).cumprod()
 
     valid_trades = ((df['Prediction'] == 2) | (df['Prediction'] == 0)).sum()
@@ -127,7 +123,7 @@ def run_backtest(df, title):
                       plot_bgcolor=bg_color, paper_bgcolor=bg_color, font=dict(color=text_color))
     st.plotly_chart(fig, use_container_width=True)
 
-    # ===== Long Trade Log =====
+    # Long Trades
     long_trades = df[df['Prediction'] == 2][['Close']].copy()
     long_trades['Entry Time'] = long_trades.index
     long_trades['Exit Time'] = long_trades.index + pd.Timedelta(minutes=90)
@@ -138,10 +134,7 @@ def run_backtest(df, title):
     long_trades.sort_values(by='Entry Time', ascending=False, inplace=True)
     long_trades['PnL (%)'] = long_trades['PnL (%)'].map(lambda x: f"<span style='color: {'green' if x >= 0 else 'red'}'>{x:.2f}%</span>")
 
-    st.subheader(f"📈 {title} Long Trade Log (EST)")
-    st.markdown(long_trades[['Entry Time', 'Entry Price', 'Exit Time', 'Exit Price', 'PnL (%)', 'Position']].to_html(escape=False, index=False), unsafe_allow_html=True)
-
-    # ===== Short Trade Log =====
+    # Short Trades
     short_trades = df[df['Prediction'] == 0][['Close']].copy()
     short_trades['Entry Time'] = short_trades.index
     short_trades['Exit Time'] = short_trades.index + pd.Timedelta(minutes=90)
@@ -152,10 +145,16 @@ def run_backtest(df, title):
     short_trades.sort_values(by='Entry Time', ascending=False, inplace=True)
     short_trades['PnL (%)'] = short_trades['PnL (%)'].map(lambda x: f"<span style='color: {'green' if x >= 0 else 'red'}'>{x:.2f}%</span>")
 
-    st.subheader(f"📉 {title} Short Trade Log (EST)")
-    st.markdown(short_trades[['Entry Time', 'Entry Price', 'Exit Time', 'Exit Price', 'PnL (%)', 'Position']].to_html(escape=False, index=False), unsafe_allow_html=True)
+    # Side-by-side Layout
+    col1, col2 = st.columns(2)
+    with col1:
+        st.subheader(f"📈 {title} Long Trade Log (EST)")
+        st.markdown(long_trades[['Entry Time', 'Entry Price', 'Exit Time', 'Exit Price', 'PnL (%)', 'Position']].to_html(escape=False, index=False), unsafe_allow_html=True)
+    with col2:
+        st.subheader(f"📉 {title} Short Trade Log (EST)")
+        st.markdown(short_trades[['Entry Time', 'Entry Price', 'Exit Time', 'Exit Price', 'PnL (%)', 'Position']].to_html(escape=False, index=False), unsafe_allow_html=True)
 
-# ========== Live or Backtest ==========
+# ========== Run Tabs ==========
 if dashboard_mode == "Backtest":
     tabs = st.tabs(["BTC/USDT", "ETH/USD", "SOL/USDT"])
     with tabs[0]:
