@@ -1,0 +1,6 @@
+streamlit
+ccxt
+ta
+pandas
+scikit-learn
+plotly
