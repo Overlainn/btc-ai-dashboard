@@ -116,12 +116,6 @@ def run_backtest(df):
     st.metric("📈 Win Rate", f"{win_rate:.2%}")
     st.metric("💰 Total Return", f"{total_return:.2f} USD")
 
-    fig = go.Figure()
-    fig.add_trace(go.Scatter(x=df.index, y=df['Equity'], name="Equity Curve", line=dict(color="green")))
-    fig.update_layout(title="Backtest Equity Curve", height=500,
-                      plot_bgcolor=bg_color, paper_bgcolor=bg_color, font=dict(color=text_color))
-    st.plotly_chart(fig, use_container_width=True)
-
     trades = df[df['Prediction'] == 1][['Close']].copy()
     trades['Entry Time'] = trades.index
     trades['Exit Time'] = trades.index + pd.Timedelta(minutes=90)
@@ -131,11 +125,50 @@ def run_backtest(df):
     trades = trades.rename(columns={'Close': 'Entry Price'})
     trades.sort_values(by='Entry Time', ascending=False, inplace=True)
 
-    # Color PnL
-    trades['PnL (%)'] = trades['PnL (%)'].map(lambda x: f"<span style='color: {'green' if x >= 0 else 'red'}'>{x:.2f}%</span>")
+    trades['PnL (%)'] = trades['PnL (%)'].map(
+        lambda x: f"<span style='color: {'green' if float(x) >= 0 else 'red'}'>{float(x):.2f}%</span>"
+    )
+
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(x=df.index, y=df['Equity'], name="Equity Curve", line=dict(color="lime")))
+
+    longs = trades[trades['Position'] == 'Long']
+    shorts = trades[trades['Position'] == 'Short']
+
+    fig.add_trace(go.Scatter(
+        x=longs['Entry Time'], y=longs['Entry Price'],
+        mode='markers', name='Long Entry',
+        marker=dict(size=10, color='green', symbol='triangle-up')
+    ))
+
+    fig.add_trace(go.Scatter(
+        x=shorts['Entry Time'], y=shorts['Entry Price'],
+        mode='markers', name='Short Entry',
+        marker=dict(size=10, color='red', symbol='triangle-down')
+    ))
+
+    fig.add_trace(go.Scatter(
+        x=trades['Exit Time'], y=trades['Exit Price'],
+        mode='markers', name='Exit',
+        marker=dict(size=8, color='white', symbol='x')
+    ))
+
+    fig.update_layout(
+        title="Backtest Equity Curve with Entry/Exit Markers",
+        height=500,
+        plot_bgcolor=bg_color,
+        paper_bgcolor=bg_color,
+        font=dict(color=text_color)
+    )
+
+    st.plotly_chart(fig, use_container_width=True)
 
     st.subheader("📅 Backtest Trades")
-    st.markdown(trades[['Entry Time', 'Entry Price', 'Exit Time', 'Exit Price', 'PnL (%)', 'Position']].to_html(escape=False, index=False), unsafe_allow_html=True)
+    st.markdown(
+        trades[['Entry Time', 'Entry Price', 'Exit Time', 'Exit Price', 'PnL (%)', 'Position']]
+        .to_html(escape=False, index=False),
+        unsafe_allow_html=True
+    )
 
 # ========== App Mode ==========
 if dashboard_mode == "Backtest":
