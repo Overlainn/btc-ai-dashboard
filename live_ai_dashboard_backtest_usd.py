@@ -1,11 +1,11 @@
 import ccxt
 import pandas as pd
 import ta
-import time
 import streamlit as st
 import plotly.graph_objs as go
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.preprocessing import StandardScaler
+from streamlit_autorefresh import st_autorefresh
 
 # ========== Load and Train a Simple Model ==========
 def train_dummy_model():
@@ -46,6 +46,9 @@ exchange = ccxt.coinbase()
 st.set_page_config(layout='wide')
 st.title("📈 Enhanced BTC/USDT AI Dashboard")
 
+# Auto-refresh every 60 seconds
+st_autorefresh(interval=60 * 1000, key="refresh")
+
 # Set fixed theme: Dark with gray background
 bg_color = "#2e2e2e"
 text_color = "#ffffff"
@@ -62,7 +65,6 @@ st.markdown(f"""
     </style>
 """, unsafe_allow_html=True)
 
-# Dashboard mode
 dashboard_mode = st.radio("Mode", ("Live", "Backtest"), horizontal=True)
 
 def get_data():
@@ -91,7 +93,6 @@ def get_data():
 def run_backtest(df):
     df['Future_Close'] = df['Close'].shift(-3)
     df['Return'] = (df['Future_Close'] - df['Close']) / df['Close']
-
     df['Prediction'] = df['Prediction'].astype(float)
     df['Strategy_Return'] = df['Return'] * df['Prediction']
     df['Strategy_Return'].fillna(0, inplace=True)
@@ -112,9 +113,7 @@ def run_backtest(df):
                       plot_bgcolor=bg_color, paper_bgcolor=bg_color, font=dict(color=text_color))
     st.plotly_chart(fig, use_container_width=True)
 
-    trades = df[df['Prediction'] == 1].copy()
-    trades = trades[trades.index.to_series().diff().gt(pd.Timedelta(hours=2)).fillna(True)]
-    trades = trades[['Close']]
+    trades = df[df['Prediction'] == 1][['Close']].copy()
     trades['Entry Time'] = trades.index
     trades['Exit Time'] = trades.index + pd.Timedelta(minutes=90)
     trades['Exit Price'] = df['Close'].shift(-3).loc[trades.index]
@@ -128,56 +127,54 @@ def run_backtest(df):
     st.subheader("📅 Backtest Trades")
     st.markdown(trades[['Entry Time', 'Entry Price', 'Exit Time', 'Exit Price', 'PnL (%)', 'Position']].to_html(escape=False, index=False), unsafe_allow_html=True)
 
+# ==== MAIN LOGIC ====
 if dashboard_mode == "Backtest":
     df = get_data()
     run_backtest(df)
 else:
-    placeholder = st.empty()
-    while True:
-        df = get_data()
-        current_price = df['Close'].iloc[-1]
+    df = get_data()
+    current_price = df['Close'].iloc[-1]
 
-        fig = go.Figure()
-        fig.add_trace(go.Scatter(x=df.index, y=df['Close'], name='Close', line=dict(color='black')))
-        fig.add_trace(go.Scatter(x=df.index, y=df['EMA9'], name='EMA9', line=dict(color='blue', dash='dot')))
-        fig.add_trace(go.Scatter(x=df.index, y=df['EMA21'], name='EMA21', line=dict(color='orange', dash='dot')))
-        fig.add_trace(go.Scatter(x=df.index, y=df['VWAP'], name='VWAP', line=dict(color='purple', dash='dot')))
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(x=df.index, y=df['Close'], name='Close', line=dict(color='black')))
+    fig.add_trace(go.Scatter(x=df.index, y=df['EMA9'], name='EMA9', line=dict(color='blue', dash='dot')))
+    fig.add_trace(go.Scatter(x=df.index, y=df['EMA21'], name='EMA21', line=dict(color='orange', dash='dot')))
+    fig.add_trace(go.Scatter(x=df.index, y=df['VWAP'], name='VWAP', line=dict(color='purple', dash='dot')))
 
-        long_signals = df[df['Prediction'] == 1]
-        short_signals = df[df['Prediction'] == 0]
+    long_signals = df[df['Prediction'] == 1]
+    short_signals = df[df['Prediction'] == 0]
 
-        fig.add_trace(go.Scatter(
-            x=long_signals.index, y=long_signals['Close'],
-            mode='markers', name='📈 Long Signal',
-            marker=dict(size=10, color='green', symbol='triangle-up')
-        ))
+    fig.add_trace(go.Scatter(
+        x=long_signals.index, y=long_signals['Close'],
+        mode='markers', name='📈 Long Signal',
+        marker=dict(size=10, color='green', symbol='triangle-up')
+    ))
 
-        fig.add_trace(go.Scatter(
-            x=short_signals.index, y=short_signals['Close'],
-            mode='markers', name='📉 Short Signal',
-            marker=dict(size=10, color='red', symbol='triangle-down')
-        ))
+    fig.add_trace(go.Scatter(
+        x=short_signals.index, y=short_signals['Close'],
+        mode='markers', name='📉 Short Signal',
+        marker=dict(size=10, color='red', symbol='triangle-down')
+    ))
 
-        fig.add_annotation(
-            xref="paper", yref="paper",
-            x=0, y=1.1, showarrow=False,
-            text=f"<b>Current BTC Price: ${current_price:.2f}</b>",
-            font=dict(size=16, color='white'),
-            bgcolor="black",
-            borderpad=4
-        )
+    fig.add_annotation(
+        xref="paper", yref="paper",
+        x=0, y=1.1, showarrow=False,
+        text=f"<b>Current BTC Price: ${current_price:.2f}</b>",
+        font=dict(size=16, color='white'),
+        bgcolor="black",
+        borderpad=4
+    )
 
-        fig.update_layout(
-            title='BTC/USDT Price with AI Predictions',
-            xaxis_title='Time',
-            yaxis_title='Price',
-            height=700,
-            plot_bgcolor=bg_color,
-            paper_bgcolor=bg_color,
-            font=dict(color=text_color),
-            xaxis=dict(showgrid=True),
-            yaxis=dict(showgrid=True)
-        )
+    fig.update_layout(
+        title='BTC/USDT Price with AI Predictions',
+        xaxis_title='Time',
+        yaxis_title='Price',
+        height=700,
+        plot_bgcolor=bg_color,
+        paper_bgcolor=bg_color,
+        font=dict(color=text_color),
+        xaxis=dict(showgrid=True),
+        yaxis=dict(showgrid=True)
+    )
 
-        placeholder.plotly_chart(fig, use_container_width=True)
-        time.sleep(60)
+    st.plotly_chart(fig, use_container_width=True)
