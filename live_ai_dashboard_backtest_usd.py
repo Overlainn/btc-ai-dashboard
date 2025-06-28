@@ -84,10 +84,16 @@ def get_data():
 def run_backtest(df):
     df['Future_Close'] = df['Close'].shift(-3)
     df['Return'] = (df['Future_Close'] - df['Close']) / df['Close']
+
+    df['Prediction'] = df['Prediction'].astype(float)
     df['Strategy_Return'] = df['Return'] * df['Prediction']
+    df['Strategy_Return'].fillna(0, inplace=True)
+
     df['Equity'] = 100 * (1 + df['Strategy_Return']).cumprod()
 
-    win_rate = (df['Strategy_Return'] > 0).sum() / df['Prediction'].sum() if df['Prediction'].sum() > 0 else 0
+    valid_trades = df['Prediction'].sum()
+    win_trades = (df['Strategy_Return'] > 0).sum()
+    win_rate = win_trades / valid_trades if valid_trades > 0 else 0
     total_return = df['Equity'].iloc[-1] - 100
 
     st.metric("📈 Win Rate", f"{win_rate:.2%}")
@@ -98,6 +104,16 @@ def run_backtest(df):
     fig.update_layout(title="Backtest Equity Curve", height=500,
                       plot_bgcolor=bg_color, paper_bgcolor=bg_color, font=dict(color=text_color))
     st.plotly_chart(fig, use_container_width=True)
+
+    trades = df[df['Prediction'] == 1][['Close']].copy()
+    trades['Entry Time'] = trades.index
+    trades['Exit Time'] = trades.index + pd.Timedelta(minutes=90)
+    trades['Exit Price'] = df['Close'].shift(-3).loc[trades.index]
+    trades['PnL (%)'] = (trades['Exit Price'] - trades['Close']) / trades['Close'] * 100
+    trades = trades.rename(columns={'Close': 'Entry Price'})
+
+    st.subheader("📅 Backtest Trades")
+    st.dataframe(trades[['Entry Time', 'Entry Price', 'Exit Time', 'Exit Price', 'PnL (%)']])
 
 if dashboard_mode == "Backtest":
     df = get_data()
