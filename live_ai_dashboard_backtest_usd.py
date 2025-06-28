@@ -1,17 +1,16 @@
 import ccxt
 import pandas as pd
 import ta
+import time
 import streamlit as st
 import plotly.graph_objs as go
-import time
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.preprocessing import StandardScaler
 
-# ========== Model Training ==========
-@st.cache_resource
+# Train AI model
 def train_model():
     exchange = ccxt.coinbase()
-    ohlcv = exchange.fetch_ohlcv('BTC/USDT', '30m', limit=300)
+    ohlcv = exchange.fetch_ohlcv('BTC/USDT', '30m', limit=500)
     df = pd.DataFrame(ohlcv, columns=['Timestamp', 'Open', 'High', 'Low', 'Close', 'Volume'])
     df['Timestamp'] = pd.to_datetime(df['Timestamp'], unit='ms')
     df.set_index('Timestamp', inplace=True)
@@ -25,6 +24,7 @@ def train_model():
     df['ATR'] = ta.volatility.average_true_range(df['High'], df['Low'], df['Close'])
     df['ROC'] = ta.momentum.roc(df['Close'], window=5)
     df['OBV'] = ta.volume.on_balance_volume(df['Close'], df['Volume'])
+
     df.dropna(inplace=True)
 
     df['Target'] = (df['Close'].shift(-3) > df['Close']).astype(int)
@@ -32,27 +32,34 @@ def train_model():
     y = df['Target']
 
     scaler = StandardScaler()
-    X_scaled = scaler.fit_transform(X)
-
-    model = RandomForestClassifier(n_estimators=50)
-    model.fit(X_scaled, y)
-
+    model = RandomForestClassifier(n_estimators=100, random_state=42)
+    model.fit(scaler.fit_transform(X), y)
     return model, scaler
 
 model, scaler = train_model()
 exchange = ccxt.coinbase()
-st.set_page_config(layout="wide")
-st.title("📊 BTC/USDT AI Dashboard")
 
-# Styling
-st.markdown("""
-<style>
-    .main, .block-container { background-color: #1e1e1e !important; color: white; }
-</style>
+st.set_page_config(layout="wide")
+st.title("💹 BTC/USDT AI Dashboard")
+
+bg_color = "#1e1e1e"
+text_color = "#ffffff"
+st.markdown(f"""
+    <style>
+        .main, .block-container {{
+            background-color: {bg_color} !important;
+            color: {text_color};
+        }}
+        .dataframe th, .dataframe td {{
+            text-align: center;
+        }}
+    </style>
 """, unsafe_allow_html=True)
 
-# ========== Load Data ==========
-def get_data():
+mode = st.radio("Mode", ["Live", "Backtest"], horizontal=True)
+
+# === Fetch & Predict ===
+def fetch_data():
     ohlcv = exchange.fetch_ohlcv('BTC/USDT', '30m', limit=300)
     df = pd.DataFrame(ohlcv, columns=['Timestamp', 'Open', 'High', 'Low', 'Close', 'Volume'])
     df['Timestamp'] = pd.to_datetime(df['Timestamp'], unit='ms')
@@ -67,75 +74,88 @@ def get_data():
     df['ATR'] = ta.volatility.average_true_range(df['High'], df['Low'], df['Close'])
     df['ROC'] = ta.momentum.roc(df['Close'], window=5)
     df['OBV'] = ta.volume.on_balance_volume(df['Close'], df['Volume'])
+
     df.dropna(inplace=True)
 
     features = ['EMA9', 'EMA21', 'VWAP', 'RSI', 'MACD', 'MACD_Signal', 'ATR', 'ROC', 'OBV']
     df['Prediction'] = model.predict(scaler.transform(df[features]))
-
     return df
 
-# ========== Backtest ==========
-def run_backtest(df):
-    entry_times = []
-    equity = [100]
-    capital = 100
-    last_trade_time = df.index[0] - pd.Timedelta(hours=2)
+# === Backtest Logic ===
+def backtest(df):
     trades = []
+    last_entry = None
+    equity = 100000
+    equity_curve = []
 
     for i in range(len(df) - 1):
-        now = df.index[i]
-        if df['Prediction'].iloc[i] == 1 and now - last_trade_time >= pd.Timedelta(hours=2):
-            entry_price = df['Close'].iloc[i]
-            tp_price = entry_price * 1.04
-            sl_price = entry_price * 0.98
+        row = df.iloc[i]
+        if row['Prediction'] == 1:
+            now = row.name
+            if last_entry is None or (now - last_entry).total_seconds() >= 7200:
+                entry_price = row['Close']
+                for j in range(i+1, len(df)):
+                    future = df.iloc[j]
+                    exit_price = future['Close']
+                    change = (exit_price - entry_price) / entry_price
 
-            exit_price = None
-            exit_time = None
+                    if change >= 0.04 or change <= -0.02 or j == len(df) - 1:
+                        pnl = (exit_price - entry_price) / entry_price * 100
+                        trades.append({
+                            "Entry Time": row.name,
+                            "Exit Time": future.name,
+                            "Entry Price": entry_price,
+                            "Exit Price": exit_price,
+                            "PnL (%)": pnl,
+                            "Position": "Long"
+                        })
+                        last_entry = now
+                        break
 
-            for j in range(i + 1, min(i + 10, len(df))):  # check next 5 candles
-                high = df['High'].iloc[j]
-                low = df['Low'].iloc[j]
-                exit_index = df.index[j]
+        equity_curve.append(equity)
+        if trades:
+            equity = 100000
+            for t in trades:
+                equity *= (1 + t['PnL (%)'] / 100)
 
-                if high >= tp_price:
-                    exit_price = tp_price
-                    exit_time = exit_index
-                    break
-                elif low <= sl_price:
-                    exit_price = sl_price
-                    exit_time = exit_index
-                    break
+    trade_df = pd.DataFrame(trades)
+    equity_series = pd.Series(equity_curve, index=df.iloc[:len(equity_curve)].index)
 
-            if exit_price is None:
-                exit_price = df['Close'].iloc[min(i + 3, len(df) - 1)]
-                exit_time = df.index[min(i + 3, len(df) - 1)]
+    win_rate = (trade_df["PnL (%)"] > 0).mean() if not trade_df.empty else 0
+    total_return = equity_series.iloc[-1] - 100000
 
-            pnl = (exit_price - entry_price) / entry_price
-            capital *= (1 + pnl)
-            equity.append(capital)
-            entry_times.append(now)
-            trades.append({
-                'Entry Time': now,
-                'Exit Time': exit_time,
-                'Entry Price': entry_price,
-                'Exit Price': exit_price,
-                'PnL (%)': pnl * 100,
-                'Type': 'Long'
-            })
-            last_trade_time = now
+    st.metric("📈 Win Rate", f"{win_rate:.2%}")
+    st.metric("💰 Total Return", f"{total_return:.2f} USD")
 
-    equity_df = pd.Series(equity, index=[df.index[0]] + entry_times)
-    trades_df = pd.DataFrame(trades)
-    return equity_df, trades_df
+    # Chart
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(x=equity_series.index, y=equity_series, name="Equity Curve", line=dict(color="green")))
 
-# ========== Display Tabs ==========
-mode = st.radio("Mode", ["Live", "Backtest"], horizontal=True)
+    if not trade_df.empty:
+        fig.add_trace(go.Scatter(
+            x=trade_df["Entry Time"], y=trade_df["Entry Price"],
+            mode='markers', name="Long Entry", marker=dict(color='green', symbol='triangle-up', size=10)
+        ))
+        fig.add_trace(go.Scatter(
+            x=trade_df["Exit Time"], y=trade_df["Exit Price"],
+            mode='markers', name="Exit", marker=dict(color='white', symbol='x', size=9)
+        ))
 
-df = get_data()
+    fig.update_layout(
+        title="📉 Equity Curve with Entries & Exits",
+        plot_bgcolor=bg_color, paper_bgcolor=bg_color, font=dict(color=text_color)
+    )
+    st.plotly_chart(fig, use_container_width=True)
 
-if mode == "Live":
+    # Table
+    if not trade_df.empty:
+        trade_df["PnL (%)"] = trade_df["PnL (%)"].map(lambda x: f"<span style='color:{'green' if x > 0 else 'red'}'>{x:.2f}%</span>")
+        st.markdown(trade_df.to_html(escape=False, index=False), unsafe_allow_html=True)
+
+# === Live Mode ===
+def live_chart(df):
     current_price = df['Close'].iloc[-1]
-    st.markdown(f"### 💰 Current BTC/USDT: **${current_price:.2f}**")
+    st.markdown(f"### 🪙 Current BTC/USDT: **${current_price:,.2f}**")
 
     fig = go.Figure()
     fig.add_trace(go.Scatter(x=df.index, y=df['Close'], name='Close', line=dict(color='white')))
@@ -143,27 +163,24 @@ if mode == "Live":
     fig.add_trace(go.Scatter(x=df.index, y=df['EMA21'], name='EMA21', line=dict(color='orange', dash='dot')))
     fig.add_trace(go.Scatter(x=df.index, y=df['VWAP'], name='VWAP', line=dict(color='purple', dash='dot')))
 
-    signals = df[df['Prediction'] == 1]
-    fig.add_trace(go.Scatter(x=signals.index, y=signals['Close'], mode='markers', name='Long', marker=dict(color='green', symbol='triangle-up', size=10)))
+    longs = df[df['Prediction'] == 1]
+    shorts = df[df['Prediction'] == 0]
 
-    fig.update_layout(height=600, plot_bgcolor="#1e1e1e", paper_bgcolor="#1e1e1e", font=dict(color='white'))
+    fig.add_trace(go.Scatter(x=longs.index, y=longs['Close'],
+        mode='markers', name='Long', marker=dict(color='lime', symbol='triangle-up', size=8)))
+    fig.add_trace(go.Scatter(x=shorts.index, y=shorts['Close'],
+        mode='markers', name='Short', marker=dict(color='red', symbol='triangle-down', size=8)))
+
+    fig.update_layout(
+        title='Live BTC/USDT with Indicators',
+        plot_bgcolor=bg_color, paper_bgcolor=bg_color, font=dict(color=text_color),
+        height=700
+    )
     st.plotly_chart(fig, use_container_width=True)
 
-elif mode == "Backtest":
-    equity_curve, trades_df = run_backtest(df)
-
-    st.subheader("📈 Equity Curve with Entries & Exits")
-    fig = go.Figure()
-    fig.add_trace(go.Scatter(x=equity_curve.index, y=equity_curve, name='Equity Curve', line=dict(color='green')))
-    fig.add_trace(go.Scatter(x=trades_df['Entry Time'], y=trades_df['Entry Price'], mode='markers', name='Long Entry', marker=dict(color='green', symbol='triangle-up')))
-    fig.add_trace(go.Scatter(x=trades_df['Exit Time'], y=trades_df['Exit Price'], mode='markers', name='Exit', marker=dict(color='white', symbol='x')))
-
-    fig.update_layout(height=600, plot_bgcolor="#1e1e1e", paper_bgcolor="#1e1e1e", font=dict(color='white'))
-    st.plotly_chart(fig, use_container_width=True)
-
-    trades_df['PnL (%)'] = trades_df['PnL (%)'].apply(lambda x: f"<span style='color: {'green' if x >= 0 else 'red'}'>{x:.2f}%</span>")
-    st.markdown("### 📊 Backtest Trades")
-    st.markdown(trades_df[['Entry Time', 'Entry Price', 'Exit Time', 'Exit Price', 'PnL (%)', 'Type']].to_html(escape=False, index=False), unsafe_allow_html=True)
-
-    st.metric("Total Trades", len(trades_df))
-    st.metric("Final Equity", f"${equity_curve.iloc[-1]:.2f}")
+# Run app
+df = fetch_data()
+if mode == "Live":
+    live_chart(df)
+else:
+    backtest(df)
