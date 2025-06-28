@@ -13,13 +13,12 @@ if 'last_refresh' not in st.session_state:
     st.session_state.last_refresh = time.time()
 
 refresh_interval = 60  # seconds
-
 if time.time() - st.session_state.last_refresh > refresh_interval:
     st.session_state.last_refresh = time.time()
     st.rerun()
 
 # ========== Load and Train Model ==========
-def train_model():
+def train_dummy_model():
     exchange = ccxt.coinbase()
     ohlcv = exchange.fetch_ohlcv('BTC/USDT', '30m', limit=300)
     df = pd.DataFrame(ohlcv, columns=['Timestamp', 'Open', 'High', 'Low', 'Close', 'Volume'])
@@ -37,24 +36,23 @@ def train_model():
     df['OBV'] = ta.volume.on_balance_volume(df['Close'], df['Volume'])
 
     df.dropna(inplace=True)
-    df['Future_Close'] = df['Close'].shift(-3)
-    df['Return'] = (df['Future_Close'] - df['Close']) / df['Close']
 
-    # 3-class target
-    df['Target'] = df['Return'].apply(lambda x: 2 if x > 0.0025 else (0 if x < -0.0025 else 1))
+    df['Target'] = df['Close'].shift(-3)
+    df['Return'] = (df['Target'] - df['Close']) / df['Close']
+    df['Label'] = df['Return'].apply(lambda x: 2 if x > 0.0025 else (0 if x < -0.0025 else 1))  # 3-class label
 
     X = df[['EMA9', 'EMA21', 'VWAP', 'RSI', 'MACD', 'MACD_Signal', 'ATR', 'ROC', 'OBV']]
-    y = df['Target']
+    y = df['Label']
 
     scaler = StandardScaler()
     X_scaled = scaler.fit_transform(X)
 
-    model = RandomForestClassifier(n_estimators=100, random_state=42)
+    model = RandomForestClassifier(n_estimators=50, random_state=42)
     model.fit(X_scaled, y)
 
     return model, scaler
 
-model, scaler = train_model()
+model, scaler = train_dummy_model()
 exchange = ccxt.coinbase()
 est = pytz.timezone('US/Eastern')
 
@@ -64,7 +62,6 @@ st.title("📈 Enhanced AI Dashboard: BTC, SOL, ETH")
 
 bg_color = "#2e2e2e"
 text_color = "#ffffff"
-
 st.markdown(f"""
     <style>
         .main, .block-container {{
@@ -97,8 +94,9 @@ def get_data(symbol):
     df['OBV'] = ta.volume.on_balance_volume(df['Close'], df['Volume'])
 
     df.dropna(inplace=True)
+
     features = ['EMA9', 'EMA21', 'VWAP', 'RSI', 'MACD', 'MACD_Signal', 'ATR', 'ROC', 'OBV']
-    df['Prediction'] = model.predict(scaler.transform(df[features]))
+    df['Signal'] = model.predict(scaler.transform(df[features]))
 
     return df
 
@@ -106,34 +104,36 @@ def get_data(symbol):
 def run_backtest(df, title):
     df['Future_Close'] = df['Close'].shift(-3)
     df['Return'] = (df['Future_Close'] - df['Close']) / df['Close']
-    df['Signal'] = df['Prediction']
 
-    # Long = 2, Neutral = 1, Short = 0
-    df['Strategy_Return'] = 0
-    df.loc[df['Signal'] == 2, 'Strategy_Return'] = df['Return']
-    df.loc[df['Signal'] == 0, 'Strategy_Return'] = -df['Return']
+    df['Strategy_Return'] = 0.0
+    df.loc[df['Signal'] == 2, 'Strategy_Return'] = df['Return']  # Long
+    df.loc[df['Signal'] == 0, 'Strategy_Return'] = -df['Return']  # Short
     df['Equity'] = 100 * (1 + df['Strategy_Return'].fillna(0)).cumprod()
 
-    trades = df[df['Signal'] != 1][['Close']].copy()
-    trades['Entry Time'] = trades.index
-    trades['Exit Time'] = trades.index + pd.Timedelta(minutes=90)
-    trades['Exit Price'] = df['Close'].shift(-3).loc[trades.index]
-    trades['Position'] = trades['Signal'].map({0: 'Short', 2: 'Long'})
-    trades['PnL (%)'] = (trades['Exit Price'] - trades['Close']) / trades['Close'] * 100
-    trades.loc[trades['Position'] == 'Short', 'PnL (%)'] *= -1
+    valid_trades = ((df['Signal'] == 0) | (df['Signal'] == 2)).sum()
+    win_trades = ((df['Signal'] == 2) & (df['Return'] > 0)).sum() + ((df['Signal'] == 0) & (df['Return'] < 0)).sum()
+    win_rate = win_trades / valid_trades if valid_trades > 0 else 0
+    total_return = df['Equity'].iloc[-1] - 100
 
-    trades = trades.rename(columns={'Close': 'Entry Price'})
-    trades.sort_values(by='Entry Time', ascending=False, inplace=True)
-    trades['PnL (%)'] = trades['PnL (%)'].map(lambda x: f"<span style='color: {'green' if x >= 0 else 'red'}'>{x:.2f}%</span>")
-
-    st.metric("📈 Win Rate", f"{(trades['PnL (%)'].str.contains('green').sum() / len(trades)):.2%}")
-    st.metric("💰 Total Return", f"{df['Equity'].iloc[-1] - 100:.2f} USD")
+    st.metric("📈 Win Rate", f"{win_rate:.2%}")
+    st.metric("💰 Total Return", f"{total_return:.2f} USD")
 
     fig = go.Figure()
     fig.add_trace(go.Scatter(x=df.index, y=df['Equity'], name="Equity Curve", line=dict(color="green")))
     fig.update_layout(title=f"{title} Backtest Equity Curve", height=500,
                       plot_bgcolor=bg_color, paper_bgcolor=bg_color, font=dict(color=text_color))
     st.plotly_chart(fig, use_container_width=True)
+
+    # ===== Trade Log =====
+    trades = df[df['Signal'] != 1][['Close', 'Signal']].copy()
+    trades['Entry Time'] = trades.index
+    trades['Exit Time'] = trades.index + pd.Timedelta(minutes=90)
+    trades['Exit Price'] = df['Close'].shift(-3).loc[trades.index]
+    trades['PnL (%)'] = (trades['Exit Price'] - trades['Close']) / trades['Close'] * 100
+    trades['Position'] = trades['Signal'].map({0: 'Short', 2: 'Long'})
+    trades = trades.rename(columns={'Close': 'Entry Price'})
+    trades.sort_values(by='Entry Time', ascending=False, inplace=True)
+    trades['PnL (%)'] = trades['PnL (%)'].map(lambda x: f"<span style='color: {'green' if x >= 0 else 'red'}'>{x:.2f}%</span>" if pd.notna(x) else 'N/A')
 
     st.subheader(f"📅 {title} Backtest Trade Log (EST)")
     st.markdown(trades[['Entry Time', 'Entry Price', 'Exit Time', 'Exit Price', 'PnL (%)', 'Position']].to_html(escape=False, index=False), unsafe_allow_html=True)
@@ -163,14 +163,14 @@ else:
         fig.add_trace(go.Scatter(x=df.index, y=df['VWAP'], name='VWAP', line=dict(color='purple', dash='dot')))
 
         fig.add_trace(go.Scatter(
-            x=df[df['Prediction'] == 2].index,
-            y=df[df['Prediction'] == 2]['Close'],
+            x=df[df['Signal'] == 2].index,
+            y=df[df['Signal'] == 2]['Close'],
             mode='markers', name='📈 Long',
             marker=dict(size=10, color='green', symbol='triangle-up')
         ))
         fig.add_trace(go.Scatter(
-            x=df[df['Prediction'] == 0].index,
-            y=df[df['Prediction'] == 0]['Close'],
+            x=df[df['Signal'] == 0].index,
+            y=df[df['Signal'] == 0]['Close'],
             mode='markers', name='📉 Short',
             marker=dict(size=10, color='red', symbol='triangle-down')
         ))
