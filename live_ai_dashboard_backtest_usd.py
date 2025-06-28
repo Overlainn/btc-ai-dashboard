@@ -119,6 +119,20 @@ def run_backtest(df):
                       plot_bgcolor=bg_color, paper_bgcolor=bg_color, font=dict(color=text_color))
     st.plotly_chart(fig, use_container_width=True)
 
+    # ===== Trade Log =====
+    trades = df[df['Prediction'] == 1][['Close']].copy()
+    trades['Entry Time'] = trades.index
+    trades['Exit Time'] = trades.index + pd.Timedelta(minutes=90)
+    trades['Exit Price'] = df['Close'].shift(-3).loc[trades.index]
+    trades['PnL (%)'] = (trades['Exit Price'] - trades['Close']) / trades['Close'] * 100
+    trades['Position'] = trades['PnL (%)'].apply(lambda x: 'Long' if x >= 0 else 'Short')
+    trades = trades.rename(columns={'Close': 'Entry Price'})
+    trades.sort_values(by='Entry Time', ascending=False, inplace=True)
+    trades['PnL (%)'] = trades['PnL (%)'].map(lambda x: f"<span style='color: {'green' if x >= 0 else 'red'}'>{x:.2f}%</span>" if pd.notna(x) else 'N/A')
+
+    st.subheader("📅 Backtest Trade Log")
+    st.markdown(trades[['Entry Time', 'Entry Price', 'Exit Time', 'Exit Price', 'PnL (%)', 'Position']].to_html(escape=False, index=False), unsafe_allow_html=True)
+
 # ========== Live Dashboard ==========
 if dashboard_mode == "Backtest":
     df = get_data('BTC/USDT')
