@@ -119,6 +119,7 @@ def run_backtest(df):
     trades['PnL (%)'] = (trades['Exit Price'] - trades['Close']) / trades['Close'] * 100
     trades['Position'] = trades['PnL (%)'].apply(lambda x: 'Long' if x >= 0 else 'Short')
     trades = trades.rename(columns={'Close': 'Entry Price'})
+    trades.sort_values(by='Entry Time', ascending=False, inplace=True)
 
     trades['PnL (%)'] = trades['PnL (%)'].map(lambda x: f"<span style='color: {'green' if x >= 0 else 'red'}'>{x:.2f}%</span>")
 
