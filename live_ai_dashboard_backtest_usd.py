@@ -98,8 +98,8 @@ def get_data(symbol):
 
     return df
 
-# ========== Backtest ==========
-def run_backtest(df):
+# ========== Backtest Function ==========
+def run_backtest(df, title):
     df['Future_Close'] = df['Close'].shift(-3)
     df['Return'] = (df['Future_Close'] - df['Close']) / df['Close']
     df['Prediction'] = df['Prediction'].astype(float)
@@ -117,7 +117,7 @@ def run_backtest(df):
 
     fig = go.Figure()
     fig.add_trace(go.Scatter(x=df.index, y=df['Equity'], name="Equity Curve", line=dict(color="green")))
-    fig.update_layout(title="Backtest Equity Curve", height=500,
+    fig.update_layout(title=f"{title} Backtest Equity Curve", height=500,
                       plot_bgcolor=bg_color, paper_bgcolor=bg_color, font=dict(color=text_color))
     st.plotly_chart(fig, use_container_width=True)
 
@@ -132,13 +132,21 @@ def run_backtest(df):
     trades.sort_values(by='Entry Time', ascending=False, inplace=True)
     trades['PnL (%)'] = trades['PnL (%)'].map(lambda x: f"<span style='color: {'green' if x >= 0 else 'red'}'>{x:.2f}%</span>" if pd.notna(x) else 'N/A')
 
-    st.subheader("📅 Backtest Trade Log (EST)")
+    st.subheader(f"📅 {title} Backtest Trade Log (EST)")
     st.markdown(trades[['Entry Time', 'Entry Price', 'Exit Time', 'Exit Price', 'PnL (%)', 'Position']].to_html(escape=False, index=False), unsafe_allow_html=True)
 
-# ========== Live Dashboard ==========
+# ========== Live or Backtest ==========
 if dashboard_mode == "Backtest":
-    df = get_data('BTC/USDT')
-    run_backtest(df)
+    tabs = st.tabs(["BTC/USDT", "ETH/USD", "SOL/USDT"])
+    with tabs[0]:
+        df = get_data('BTC/USDT')
+        run_backtest(df, "BTC/USDT")
+    with tabs[1]:
+        df = get_data('ETH/USD')
+        run_backtest(df, "ETH/USD")
+    with tabs[2]:
+        df = get_data('SOL/USDT')
+        run_backtest(df, "SOL/USDT")
 else:
     def display_chart(symbol, label):
         df = get_data(symbol)
