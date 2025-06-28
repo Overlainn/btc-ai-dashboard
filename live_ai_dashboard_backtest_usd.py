@@ -8,11 +8,12 @@ from sklearn.ensemble import RandomForestClassifier
 from sklearn.preprocessing import StandardScaler
 import pytz
 
-# ========== Auto-refresh every 60 seconds ==========
+# ========== Auto-refresh ==========
 if 'last_refresh' not in st.session_state:
     st.session_state.last_refresh = time.time()
 
 refresh_interval = 60  # seconds
+
 if time.time() - st.session_state.last_refresh > refresh_interval:
     st.session_state.last_refresh = time.time()
     st.rerun()
@@ -25,6 +26,7 @@ def train_dummy_model():
     df['Timestamp'] = pd.to_datetime(df['Timestamp'], unit='ms')
     df.set_index('Timestamp', inplace=True)
 
+    # Indicators
     df['EMA9'] = ta.trend.ema_indicator(df['Close'], window=9)
     df['EMA21'] = ta.trend.ema_indicator(df['Close'], window=21)
     df['VWAP'] = ta.volume.volume_weighted_average_price(df['High'], df['Low'], df['Close'], df['Volume'])
@@ -37,17 +39,17 @@ def train_dummy_model():
 
     df.dropna(inplace=True)
 
-    df['Target'] = df['Close'].shift(-3)
-    df['Return'] = (df['Target'] - df['Close']) / df['Close']
-    df['Label'] = df['Return'].apply(lambda x: 2 if x > 0.0025 else (0 if x < -0.0025 else 1))  # 3-class label
+    # 3-class Target
+    df['Return_3'] = (df['Close'].shift(-3) - df['Close']) / df['Close']
+    df['Target'] = df['Return_3'].apply(lambda x: 2 if x > 0.0025 else (0 if x < -0.0025 else 1))
 
     X = df[['EMA9', 'EMA21', 'VWAP', 'RSI', 'MACD', 'MACD_Signal', 'ATR', 'ROC', 'OBV']]
-    y = df['Label']
+    y = df['Target']
 
     scaler = StandardScaler()
     X_scaled = scaler.fit_transform(X)
 
-    model = RandomForestClassifier(n_estimators=50, random_state=42)
+    model = RandomForestClassifier(n_estimators=50)
     model.fit(X_scaled, y)
 
     return model, scaler
@@ -62,6 +64,7 @@ st.title("📈 Enhanced AI Dashboard: BTC, SOL, ETH")
 
 bg_color = "#2e2e2e"
 text_color = "#ffffff"
+
 st.markdown(f"""
     <style>
         .main, .block-container {{
@@ -94,9 +97,8 @@ def get_data(symbol):
     df['OBV'] = ta.volume.on_balance_volume(df['Close'], df['Volume'])
 
     df.dropna(inplace=True)
-
     features = ['EMA9', 'EMA21', 'VWAP', 'RSI', 'MACD', 'MACD_Signal', 'ATR', 'ROC', 'OBV']
-    df['Signal'] = model.predict(scaler.transform(df[features]))
+    df['Prediction'] = model.predict(scaler.transform(df[features]))
 
     return df
 
@@ -106,12 +108,13 @@ def run_backtest(df, title):
     df['Return'] = (df['Future_Close'] - df['Close']) / df['Close']
 
     df['Strategy_Return'] = 0.0
-    df.loc[df['Signal'] == 2, 'Strategy_Return'] = df['Return']  # Long
-    df.loc[df['Signal'] == 0, 'Strategy_Return'] = -df['Return']  # Short
+    df.loc[df['Prediction'] == 2, 'Strategy_Return'] = df['Return']
+    df.loc[df['Prediction'] == 0, 'Strategy_Return'] = -df['Return']
+
     df['Equity'] = 100 * (1 + df['Strategy_Return'].fillna(0)).cumprod()
 
-    valid_trades = ((df['Signal'] == 0) | (df['Signal'] == 2)).sum()
-    win_trades = ((df['Signal'] == 2) & (df['Return'] > 0)).sum() + ((df['Signal'] == 0) & (df['Return'] < 0)).sum()
+    valid_trades = ((df['Prediction'] == 2) | (df['Prediction'] == 0)).sum()
+    win_trades = ((df['Prediction'] == 2) & (df['Return'] > 0)).sum() + ((df['Prediction'] == 0) & (df['Return'] < 0)).sum()
     win_rate = win_trades / valid_trades if valid_trades > 0 else 0
     total_return = df['Equity'].iloc[-1] - 100
 
@@ -124,19 +127,33 @@ def run_backtest(df, title):
                       plot_bgcolor=bg_color, paper_bgcolor=bg_color, font=dict(color=text_color))
     st.plotly_chart(fig, use_container_width=True)
 
-    # ===== Trade Log =====
-    trades = df[df['Signal'] != 1][['Close', 'Signal']].copy()
-    trades['Entry Time'] = trades.index
-    trades['Exit Time'] = trades.index + pd.Timedelta(minutes=90)
-    trades['Exit Price'] = df['Close'].shift(-3).loc[trades.index]
-    trades['PnL (%)'] = (trades['Exit Price'] - trades['Close']) / trades['Close'] * 100
-    trades['Position'] = trades['Signal'].map({0: 'Short', 2: 'Long'})
-    trades = trades.rename(columns={'Close': 'Entry Price'})
-    trades.sort_values(by='Entry Time', ascending=False, inplace=True)
-    trades['PnL (%)'] = trades['PnL (%)'].map(lambda x: f"<span style='color: {'green' if x >= 0 else 'red'}'>{x:.2f}%</span>" if pd.notna(x) else 'N/A')
+    # ===== Long Trade Log =====
+    long_trades = df[df['Prediction'] == 2][['Close']].copy()
+    long_trades['Entry Time'] = long_trades.index
+    long_trades['Exit Time'] = long_trades.index + pd.Timedelta(minutes=90)
+    long_trades['Exit Price'] = df['Close'].shift(-3).loc[long_trades.index]
+    long_trades['PnL (%)'] = (long_trades['Exit Price'] - long_trades['Close']) / long_trades['Close'] * 100
+    long_trades['Position'] = 'Long'
+    long_trades = long_trades.rename(columns={'Close': 'Entry Price'})
+    long_trades.sort_values(by='Entry Time', ascending=False, inplace=True)
+    long_trades['PnL (%)'] = long_trades['PnL (%)'].map(lambda x: f"<span style='color: {'green' if x >= 0 else 'red'}'>{x:.2f}%</span>")
 
-    st.subheader(f"📅 {title} Backtest Trade Log (EST)")
-    st.markdown(trades[['Entry Time', 'Entry Price', 'Exit Time', 'Exit Price', 'PnL (%)', 'Position']].to_html(escape=False, index=False), unsafe_allow_html=True)
+    st.subheader(f"📈 {title} Long Trade Log (EST)")
+    st.markdown(long_trades[['Entry Time', 'Entry Price', 'Exit Time', 'Exit Price', 'PnL (%)', 'Position']].to_html(escape=False, index=False), unsafe_allow_html=True)
+
+    # ===== Short Trade Log =====
+    short_trades = df[df['Prediction'] == 0][['Close']].copy()
+    short_trades['Entry Time'] = short_trades.index
+    short_trades['Exit Time'] = short_trades.index + pd.Timedelta(minutes=90)
+    short_trades['Exit Price'] = df['Close'].shift(-3).loc[short_trades.index]
+    short_trades['PnL (%)'] = (short_trades['Close'] - short_trades['Exit Price']) / short_trades['Close'] * 100
+    short_trades['Position'] = 'Short'
+    short_trades = short_trades.rename(columns={'Close': 'Entry Price'})
+    short_trades.sort_values(by='Entry Time', ascending=False, inplace=True)
+    short_trades['PnL (%)'] = short_trades['PnL (%)'].map(lambda x: f"<span style='color: {'green' if x >= 0 else 'red'}'>{x:.2f}%</span>")
+
+    st.subheader(f"📉 {title} Short Trade Log (EST)")
+    st.markdown(short_trades[['Entry Time', 'Entry Price', 'Exit Time', 'Exit Price', 'PnL (%)', 'Position']].to_html(escape=False, index=False), unsafe_allow_html=True)
 
 # ========== Live or Backtest ==========
 if dashboard_mode == "Backtest":
@@ -163,14 +180,14 @@ else:
         fig.add_trace(go.Scatter(x=df.index, y=df['VWAP'], name='VWAP', line=dict(color='purple', dash='dot')))
 
         fig.add_trace(go.Scatter(
-            x=df[df['Signal'] == 2].index,
-            y=df[df['Signal'] == 2]['Close'],
+            x=df[df['Prediction'] == 2].index,
+            y=df[df['Prediction'] == 2]['Close'],
             mode='markers', name='📈 Long',
             marker=dict(size=10, color='green', symbol='triangle-up')
         ))
         fig.add_trace(go.Scatter(
-            x=df[df['Signal'] == 0].index,
-            y=df[df['Signal'] == 0]['Close'],
+            x=df[df['Prediction'] == 0].index,
+            y=df[df['Prediction'] == 0]['Close'],
             mode='markers', name='📉 Short',
             marker=dict(size=10, color='red', symbol='triangle-down')
         ))
