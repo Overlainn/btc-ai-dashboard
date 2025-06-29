@@ -35,7 +35,7 @@ def send_push_notification(message):
     except Exception as e:
         print("Push notification failed:", e)
 
-# ========== Load and Train Model ==========
+# ========== Train Model Live ==========
 def train_live_model():
     exchange = ccxt.coinbase()
     ohlcv = exchange.fetch_ohlcv('BTC/USDT', '15m', limit=300)
@@ -99,9 +99,10 @@ alert_log_file = os.path.join(os.getcwd(), "btc_alert_log.csv")
 if not os.path.exists(alert_log_file):
     pd.DataFrame(columns=["Timestamp", "Price", "Signal", "Scores"]).to_csv(alert_log_file, index=False)
 
-# ========== Fetch Data ==========
-last_btc_signal = st.session_state.get("last_btc_signal")
+if "last_btc_signal" not in st.session_state:
+    st.session_state.last_btc_signal = None
 
+# ========== Fetch Data ==========
 def get_data(symbol):
     ohlcv = exchange.fetch_ohlcv(symbol, '15m', limit=200)
     df = pd.DataFrame(ohlcv, columns=['Timestamp', 'Open', 'High', 'Low', 'Close', 'Volume'])
@@ -121,13 +122,14 @@ def get_data(symbol):
     df.dropna(inplace=True)
     features = ['EMA9', 'EMA21', 'VWAP', 'RSI', 'MACD', 'MACD_Signal', 'ATR', 'ROC', 'OBV']
     df['Prediction'] = model.predict(scaler.transform(df[features]))
-    df['Score_0'] = model.predict_proba(scaler.transform(df[features]))[:, 0]
-    df['Score_1'] = model.predict_proba(scaler.transform(df[features]))[:, 1]
-    df['Score_2'] = model.predict_proba(scaler.transform(df[features]))[:, 2]
+    probs = model.predict_proba(scaler.transform(df[features]))
+    df['Score_0'] = probs[:, 0]
+    df['Score_1'] = probs[:, 1]
+    df['Score_2'] = probs[:, 2]
 
     return df
 
-# ========== Live Chart + Alert Logic ==========
+# ========== Live Mode ==========
 if dash_mode == "Live":
     def display_chart(symbol, label):
         df = get_data(symbol)
@@ -135,15 +137,22 @@ if dash_mode == "Live":
 
         if symbol == 'BTC/USDT':
             current_signal = df['Prediction'].iloc[-1]
-            if last_btc_signal != current_signal:
+            previous_signal = st.session_state.last_btc_signal
+
+            if previous_signal is None or previous_signal != current_signal:
                 st.session_state.last_btc_signal = current_signal
                 signal_name = "📈 LONG" if current_signal == 2 else ("📉 SHORT" if current_signal == 0 else "🤝 NEUTRAL")
                 score0 = df['Score_0'].iloc[-1]
                 score1 = df['Score_1'].iloc[-1]
                 score2 = df['Score_2'].iloc[-1]
                 timestamp = df.index[-1].strftime("%Y-%m-%d %H:%M:%S")
-                
-                message = f"BTC Signal Changed: {signal_name}\nTime: {timestamp}\nPrice: ${current_price:.2f}\nScores - Short: {score0:.2f}, Neutral: {score1:.2f}, Long: {score2:.2f}"
+
+                message = (
+                    f"BTC Signal Changed: {signal_name}\n"
+                    f"Time: {timestamp}\n"
+                    f"Price: ${current_price:.2f}\n"
+                    f"Scores - Short: {score0:.2f}, Neutral: {score1:.2f}, Long: {score2:.2f}"
+                )
                 send_push_notification(message)
 
                 log_entry = pd.DataFrame([{
