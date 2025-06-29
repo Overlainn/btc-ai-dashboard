@@ -54,8 +54,10 @@ def train_live_model():
     df['OBV'] = ta.volume.on_balance_volume(df['Close'], df['Volume'])
 
     df.dropna(inplace=True)
+    
+    # RELAXED LABELING: Thresholds ±0.15% instead of ±0.25%
     df['Return_3'] = (df['Close'].shift(-3) - df['Close']) / df['Close']
-    df['Target'] = df['Return_3'].apply(lambda x: 2 if x > 0.0025 else (0 if x < -0.0025 else 1))
+    df['Target'] = df['Return_3'].apply(lambda x: 2 if x > 0.0015 else (0 if x < -0.0015 else 1))
 
     features = ['EMA9', 'EMA21', 'VWAP', 'RSI', 'MACD', 'MACD_Signal', 'ATR', 'ROC', 'OBV']
     X = df[features]
@@ -124,8 +126,12 @@ def get_data(symbol):
     proba = model.predict_proba(X)
     df['Score_0'], df['Score_1'], df['Score_2'] = proba[:, 0], proba[:, 1], proba[:, 2]
 
-    # Filter to only show if score > 0.6
+    # ONLY SHOW SIGNAL IF CONFIDENCE > 60%
     df['Prediction'] = df.apply(lambda row: row['Prediction'] if row[f'Score_{int(row["Prediction"])}'] > 0.6 else 1, axis=1)
+
+    # PRINT DIAGNOSTICS
+    print("Prediction counts:", df['Prediction'].value_counts().to_dict())
+    print("Max Scores (Last Row):", df[['Score_0', 'Score_1', 'Score_2']].iloc[-1].to_dict())
 
     return df
 
@@ -137,6 +143,8 @@ def display_chart(symbol, label):
         current_signal = df['Prediction'].iloc[-1]
         if current_signal != last_btc_signal:
             st.session_state.last_btc_signal = current_signal
+
+            # Notify ONLY when signal is LONG or SHORT (not Neutral)
             if current_signal in [0, 2]:
                 signal_name = "📈 LONG" if current_signal == 2 else "📉 SHORT"
                 s0, s1, s2 = df.iloc[-1][['Score_0', 'Score_1', 'Score_2']]
@@ -174,6 +182,7 @@ def display_chart(symbol, label):
                       font=dict(color=text_color), xaxis_title='Time', yaxis_title='Price')
     st.plotly_chart(fig, use_container_width=True)
 
+# ========== Run Dashboard ==========
 if dash_mode == "Live":
     display_chart('BTC/USDT', 'BTC/USDT')
     display_chart('SOL/USDT', 'SOL/USDT')
