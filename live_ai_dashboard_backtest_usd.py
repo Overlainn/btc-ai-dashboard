@@ -8,6 +8,8 @@ from sklearn.ensemble import RandomForestClassifier
 from sklearn.preprocessing import StandardScaler
 import pytz
 import requests
+import os
+from datetime import datetime
 
 # ========== Auto-refresh ==========
 if 'last_refresh' not in st.session_state:
@@ -90,10 +92,14 @@ st.markdown(f"""
     </style>
 """, unsafe_allow_html=True)
 
-dashboard_mode = st.radio("Mode", ("Live", "Backtest"), horizontal=True)
+dash_mode = st.radio("Mode", ("Live", "Backtest"), horizontal=True)
 
 # ========== Fetch Data ==========
 last_btc_signal = st.session_state.get("last_btc_signal")
+
+alert_log_file = "btc_alert_log.csv"
+if not os.path.exists(alert_log_file):
+    pd.DataFrame(columns=["Timestamp", "Price", "Signal", "Scores"]).to_csv(alert_log_file, index=False)
 
 def get_data(symbol):
     ohlcv = exchange.fetch_ohlcv(symbol, '30m', limit=200)
@@ -114,11 +120,14 @@ def get_data(symbol):
     df.dropna(inplace=True)
     features = ['EMA9', 'EMA21', 'VWAP', 'RSI', 'MACD', 'MACD_Signal', 'ATR', 'ROC', 'OBV']
     df['Prediction'] = model.predict(scaler.transform(df[features]))
+    df['Score_0'] = model.predict_proba(scaler.transform(df[features]))[:, 0]
+    df['Score_1'] = model.predict_proba(scaler.transform(df[features]))[:, 1]
+    df['Score_2'] = model.predict_proba(scaler.transform(df[features]))[:, 2]
 
     return df
 
 # ========== Run Tabs ==========
-if dashboard_mode == "Live":
+if dash_mode == "Live":
     def display_chart(symbol, label):
         df = get_data(symbol)
         current_price = df['Close'].iloc[-1]
@@ -128,7 +137,21 @@ if dashboard_mode == "Live":
             if last_btc_signal != current_signal:
                 st.session_state.last_btc_signal = current_signal
                 signal_name = "📈 LONG" if current_signal == 2 else ("📉 SHORT" if current_signal == 0 else "🤝 NEUTRAL")
-                send_push_notification(f"BTC Signal Changed: {signal_name}")
+                score0 = df['Score_0'].iloc[-1]
+                score1 = df['Score_1'].iloc[-1]
+                score2 = df['Score_2'].iloc[-1]
+                timestamp = df.index[-1].strftime("%Y-%m-%d %H:%M:%S")
+                
+                message = f"BTC Signal Changed: {signal_name}\nTime: {timestamp}\nPrice: ${current_price:.2f}\nScores - Short: {score0:.2f}, Neutral: {score1:.2f}, Long: {score2:.2f}"
+                send_push_notification(message)
+
+                log_entry = pd.DataFrame([{
+                    "Timestamp": timestamp,
+                    "Price": current_price,
+                    "Signal": signal_name,
+                    "Scores": f"{score0:.2f}, {score1:.2f}, {score2:.2f}"
+                }])
+                log_entry.to_csv(alert_log_file, mode='a', header=False, index=False)
 
         st.subheader(f"📊 {label} Live Chart")
         fig = go.Figure()
@@ -171,3 +194,8 @@ if dashboard_mode == "Live":
     display_chart('BTC/USDT', 'BTC/USDT')
     display_chart('SOL/USDT', 'SOL/USDT')
     display_chart('ETH/USD', 'ETH/USD')
+
+    # Show log
+    st.subheader("🔔 BTC Signal Alert Log")
+    log_df = pd.read_csv(alert_log_file).tail(10)
+    st.dataframe(log_df, use_container_width=True)
