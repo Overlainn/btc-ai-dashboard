@@ -6,3 +6,7 @@ scikit-learn
 plotly
 PyDrive2
 joblib
+gdown
+google-auth
+google-auth-oauthlib
+google-api-python-client
