@@ -1,10 +1,5 @@
 # app.py
-import ccxt
-import pandas as pd
-import ta
-import time
-import streamlit as st
-import plotly.graph_objs as go
+import ccxt, pandas as pd, ta, time, streamlit as st, plotly.graph_objs as go
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.preprocessing import StandardScaler
 import pytz, requests, os, pickle, io
@@ -13,7 +8,7 @@ from google.oauth2 import service_account
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseDownload, MediaFileUpload
 
-# =================== Google Drive ===================
+# ========== Google Drive Setup ==========
 SCOPES = ['https://www.googleapis.com/auth/drive']
 SERVICE_ACCOUNT_INFO = st.secrets["google_service_account"]
 creds = service_account.Credentials.from_service_account_info(SERVICE_ACCOUNT_INFO, scopes=SCOPES)
@@ -37,17 +32,17 @@ def upload_to_drive(filename):
     folder_id = get_folder_id()
     media = MediaFileUpload(filename, resumable=True)
     file_metadata = {'name': filename, 'parents': [folder_id]}
-    query = f"name='{filename}' and '{folder_id}' in parents"
-    existing = drive_service.files().list(q=query, fields='files(id)').execute().get('files', [])
+    existing = drive_service.files().list(q=f"name='{filename}' and '{folder_id}' in parents",
+                                          fields='files(id)').execute().get('files', [])
     if existing:
         drive_service.files().delete(fileId=existing[0]['id']).execute()
     drive_service.files().create(body=file_metadata, media_body=media).execute()
 
 def download_from_drive(filename):
     folder_id = get_folder_id()
-    query = f"name='{filename}' and '{folder_id}' in parents"
-    response = drive_service.files().list(q=query, fields='files(id)').execute()
-    files = response.get('files', [])
+    results = drive_service.files().list(q=f"name='{filename}' and '{folder_id}' in parents",
+                                         fields="files(id)").execute()
+    files = results.get('files', [])
     if not files: return False
     file_id = files[0]['id']
     request = drive_service.files().get_media(fileId=file_id)
@@ -58,23 +53,22 @@ def download_from_drive(filename):
     with open(filename, 'wb') as f: f.write(fh.getvalue())
     return True
 
-# =================== Push Notifications ===================
-PUSH_USER_KEY = st.secrets["pushover"]["user"]
-PUSH_APP_TOKEN = st.secrets["pushover"]["token"]
-
-def send_push(msg):
+# ========== Push Notifications ==========
+push_user_key = st.secrets["pushover"]["user"]
+push_app_token = st.secrets["pushover"]["token"]
+def send_push_notification(msg):
     requests.post("https://api.pushover.net/1/messages.json", data={
-        "token": PUSH_APP_TOKEN, "user": PUSH_USER_KEY, "message": msg
+        "token": push_app_token, "user": push_user_key, "message": msg
     })
 
-# =================== Auto-refresh ===================
+# ========== Auto-refresh ==========
 if 'last_refresh' not in st.session_state:
     st.session_state.last_refresh = time.time()
 if time.time() - st.session_state.last_refresh > 60:
     st.session_state.last_refresh = time.time()
     st.rerun()
 
-# =================== Train ===================
+# ========== Train ==========
 def train_model():
     exchange = ccxt.coinbase()
     df = pd.DataFrame(exchange.fetch_ohlcv('BTC/USDT', '30m', limit=300),
@@ -115,7 +109,7 @@ def train_model():
     upload_to_drive(LAST_TRAIN_FILE)
     return model, scaler
 
-# =================== Load or Train ===================
+# ========== Load or Train ==========
 if os.path.exists(LAST_TRAIN_FILE):
     with open(LAST_TRAIN_FILE) as f:
         if f.read().strip() != str(date.today()):
@@ -132,13 +126,12 @@ else:
     else:
         model, scaler = train_model()
 
-# =================== Streamlit UI ===================
+# ========== Streamlit UI ==========
 st.set_page_config(layout='wide')
 st.title("📈 BTC AI Dashboard + Daily Retrain")
 mode = st.radio("Mode", ["Live", "Backtest"], horizontal=True)
 est = pytz.timezone('US/Eastern')
 exchange = ccxt.coinbase()
-
 logfile = "btc_alert_log.csv"
 if not os.path.exists(logfile):
     pd.DataFrame(columns=["Timestamp", "Price", "Signal", "Scores"]).to_csv(logfile, index=False)
@@ -160,12 +153,11 @@ def get_data():
     df['ATR'] = ta.volatility.average_true_range(df['High'], df['Low'], df['Close'])
     df['ROC'] = ta.momentum.roc(df['Close'])
     df['OBV'] = ta.volume.on_balance_volume(df['Close'], df['Volume'])
-
     df['EMA12_Cross_26'] = (df['EMA12'] > df['EMA26']).astype(int)
     df['EMA9_Cross_21'] = (df['EMA9'] > df['EMA21']).astype(int)
     df['Above_VWAP'] = (df['Close'] > df['VWAP']).astype(int)
-
     df.dropna(inplace=True)
+
     features = ['EMA9', 'EMA21', 'VWAP', 'RSI', 'MACD', 'MACD_Signal', 'ATR', 'ROC', 'OBV',
                 'EMA12_Cross_26', 'EMA9_Cross_21', 'Above_VWAP']
     df['Prediction'] = model.predict(scaler.transform(df[features]))
@@ -184,7 +176,7 @@ if mode == "Live":
         name = "📈 LONG" if pred == 2 else "📉 SHORT"
         t = df.index[-1].strftime("%Y-%m-%d %H:%M")
         msg = f"BTC {name} | {t} | ${price:.2f} | S0:{df['S0'].iloc[-1]:.2f}, S2:{df['S2'].iloc[-1]:.2f}"
-        send_push(msg)
+        send_push_notification(msg)
         pd.DataFrame([{"Timestamp": t, "Price": price, "Signal": name,
                        "Scores": f"{df['S0'].iloc[-1]:.2f},{df['S2'].iloc[-1]:.2f}"}]).to_csv(logfile, mode='a', header=False, index=False)
 
