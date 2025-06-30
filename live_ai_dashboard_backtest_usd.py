@@ -11,7 +11,7 @@ import pytz
 import requests
 import os
 import pickle
-from datetime import datetime
+from datetime import datetime, date
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseDownload, MediaFileUpload
 from google_auth_oauthlib.flow import InstalledAppFlow
@@ -33,10 +33,10 @@ def get_drive_service():
     creds = flow.run_local_server(port=0)
     return build('drive', 'v3', credentials=creds)
 
-def upload_model_to_drive(model, filename="btc_model.pkl"):
-    service = get_drive_service()
+def upload_model_to_drive(model, scaler, filename="btc_model.pkl"):
     with open(filename, "wb") as f:
-        pickle.dump(model, f)
+        pickle.dump((model, scaler), f)
+    service = get_drive_service()
     file_metadata = {'name': filename}
     media = MediaFileUpload(filename, resumable=True)
     service.files().create(body=file_metadata, media_body=media, fields='id').execute()
@@ -60,7 +60,7 @@ def download_model_from_drive(filename="btc_model.pkl"):
     with open(filename, 'rb') as f:
         return pickle.load(f)
 
-# ========== Notification ========== 
+# ========== Notification ==========
 push_user_key = "u4bs3eqg8gqsv8npdxrcqp8iezf4ad"
 push_app_token = "apccb8tmg8j9pupcirg1acfkg3pzaj"
 
@@ -75,7 +75,7 @@ def send_push_notification(message):
     except Exception as e:
         print("Push notification failed:", e)
 
-# ========== Auto-refresh ========== 
+# ========== Auto-refresh ==========
 if 'last_refresh' not in st.session_state:
     st.session_state.last_refresh = time.time()
 refresh_interval = 60
@@ -83,7 +83,7 @@ if time.time() - st.session_state.last_refresh > refresh_interval:
     st.session_state.last_refresh = time.time()
     st.rerun()
 
-# ========== Model Training ========== 
+# ========== Model Training ==========
 def train_model():
     exchange = ccxt.coinbase()
     ohlcv = exchange.fetch_ohlcv('BTC/USDT', '30m', limit=300)
@@ -96,7 +96,6 @@ def train_model():
     df['EMA12'] = ta.trend.ema_indicator(df['Close'], window=12)
     df['EMA26'] = ta.trend.ema_indicator(df['Close'], window=26)
     df['VWAP'] = ta.volume.volume_weighted_average_price(df['High'], df['Low'], df['Close'], df['Volume'])
-
     df['RSI'] = ta.momentum.rsi(df['Close'], window=14)
     df['MACD'] = ta.trend.macd(df['Close'])
     df['MACD_Signal'] = ta.trend.macd_signal(df['Close'])
@@ -124,24 +123,28 @@ def train_model():
 
     model = RandomForestClassifier(n_estimators=50)
     model.fit(X_scaled, y)
-
     with open("btc_model.pkl", "wb") as f:
         pickle.dump((model, scaler), f)
 
-    upload_model_to_drive((model, scaler))
+    upload_model_to_drive(model, scaler)
     return model, scaler
 
-# ========== Load or Train Model ========== 
-try:
-    model, scaler = pickle.load(open("btc_model.pkl", "rb"))
-except:
-    downloaded = download_model_from_drive()
-    if downloaded:
-        model, scaler = downloaded
-    else:
+# ========== Load or Train ==========
+today_str = str(date.today())
+if not os.path.exists("last_train.txt") or open("last_train.txt").read() != today_str:
+    try:
         model, scaler = train_model()
+        with open("last_train.txt", "w") as f:
+            f.write(today_str)
+    except:
+        model, scaler = pickle.load(open("btc_model.pkl", "rb"))
+else:
+    try:
+        model, scaler = pickle.load(open("btc_model.pkl", "rb"))
+    except:
+        model, scaler = download_model_from_drive()
 
-# ========== Streamlit UI ========== 
+# ========== Streamlit UI ==========
 exchange = ccxt.coinbase()
 est = pytz.timezone('US/Eastern')
 st.set_page_config(layout='wide')
@@ -167,7 +170,7 @@ alert_log_file = "btc_alert_log.csv"
 if not os.path.exists(alert_log_file):
     pd.DataFrame(columns=["Timestamp", "Price", "Signal", "Scores"]).to_csv(alert_log_file, index=False)
 
-# ========== Fetch & Predict ==========
+# ========== Prediction ==========
 def get_data(symbol):
     ohlcv = exchange.fetch_ohlcv(symbol, '30m', limit=200)
     df = pd.DataFrame(ohlcv, columns=['Timestamp', 'Open', 'High', 'Low', 'Close', 'Volume'])
@@ -179,7 +182,6 @@ def get_data(symbol):
     df['EMA12'] = ta.trend.ema_indicator(df['Close'], window=12)
     df['EMA26'] = ta.trend.ema_indicator(df['Close'], window=26)
     df['VWAP'] = ta.volume.volume_weighted_average_price(df['High'], df['Low'], df['Close'], df['Volume'])
-
     df['RSI'] = ta.momentum.rsi(df['Close'], window=14)
     df['MACD'] = ta.trend.macd(df['Close'])
     df['MACD_Signal'] = ta.trend.macd_signal(df['Close'])
@@ -202,7 +204,7 @@ def get_data(symbol):
     df['Score_0'], df['Score_1'], df['Score_2'] = probs[:, 0], probs[:, 1], probs[:, 2]
     return df
 
-# ========== Chart Logic ========== 
+# ========== Chart Logic ==========
 if dash_mode == "Live":
     def display_chart(symbol, label):
         df = get_data(symbol)
