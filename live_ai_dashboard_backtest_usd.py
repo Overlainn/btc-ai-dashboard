@@ -11,7 +11,7 @@ import requests
 import os
 from datetime import datetime
 
-# ========== Auto-refresh ==========
+# Auto-refresh
 if 'last_refresh' not in st.session_state:
     st.session_state.last_refresh = time.time()
 
@@ -20,7 +20,7 @@ if time.time() - st.session_state.last_refresh > refresh_interval:
     st.session_state.last_refresh = time.time()
     st.rerun()
 
-# ========== Notification ==========
+# Notification settings
 push_user_key = "u4bs3eqg8gqsv8npdxrcqp8iezf4ad"
 push_app_token = "apccb8tmg8j9pupcirg1acfkg3pzaj"
 
@@ -35,7 +35,7 @@ def send_push_notification(message):
     except Exception as e:
         print("Push notification failed:", e)
 
-# ========== Model Training ==========
+# Train model
 def train_model():
     exchange = ccxt.coinbase()
     ohlcv = exchange.fetch_ohlcv('BTC/USDT', '30m', limit=300)
@@ -61,7 +61,6 @@ def train_model():
     df['Price_Above_VWAP'] = (df['Close'] > df['VWAP']).astype(int)
 
     df.dropna(inplace=True)
-
     df['Return_3'] = (df['Close'].shift(-3) - df['Close']) / df['Close']
     df['Target'] = df['Return_3'].apply(lambda x: 2 if x > 0.002 else (0 if x < -0.002 else 1))
 
@@ -83,33 +82,30 @@ model, scaler = train_model()
 exchange = ccxt.coinbase()
 est = pytz.timezone('US/Eastern')
 
-# ========== Streamlit UI ==========
 st.set_page_config(layout='wide')
 st.title("📈 Enhanced AI Dashboard: BTC, SOL, ETH")
 
-bg_color = "#2e2e2e"
-text_color = "#ffffff"
-st.markdown(f"""
+# Dark theme
+st.markdown("""
     <style>
-        .main, .block-container {{
-            background-color: {bg_color} !important;
-            color: {text_color};
-        }}
-        .dataframe th, .dataframe td {{
+        .main, .block-container {
+            background-color: #2e2e2e !important;
+            color: #ffffff;
+        }
+        .dataframe th, .dataframe td {
             text-align: center !important;
-        }}
+        }
     </style>
 """, unsafe_allow_html=True)
 
 dash_mode = st.radio("Mode", ("Live", "Backtest"), horizontal=True)
 
-# ========== State and Logging ==========
+# State
 last_btc_signal = st.session_state.get("last_btc_signal")
 alert_log_file = "btc_alert_log.csv"
 if not os.path.exists(alert_log_file):
     pd.DataFrame(columns=["Timestamp", "Price", "Signal", "Scores"]).to_csv(alert_log_file, index=False)
 
-# ========== Data Fetch & Prediction ==========
 def get_data(symbol):
     ohlcv = exchange.fetch_ohlcv(symbol, '30m', limit=200)
     df = pd.DataFrame(ohlcv, columns=['Timestamp', 'Open', 'High', 'Low', 'Close', 'Volume'])
@@ -146,7 +142,7 @@ def get_data(symbol):
 
     return df
 
-# ========== Main Dashboard ==========
+# Main chart
 if dash_mode == "Live":
     def display_chart(symbol, label):
         df = get_data(symbol)
@@ -156,7 +152,7 @@ if dash_mode == "Live":
             current_signal = df['Prediction'].iloc[-1]
             confidence = max(df['Score_0'].iloc[-1], df['Score_2'].iloc[-1])
 
-            if current_signal in [0, 2] and confidence >= 0.60 and current_signal != last_btc_signal:
+            if current_signal in [0, 2] and confidence > 0.60 and current_signal != last_btc_signal:
                 st.session_state.last_btc_signal = current_signal
                 signal_name = "📈 LONG" if current_signal == 2 else "📉 SHORT"
                 score0 = df['Score_0'].iloc[-1]
@@ -198,8 +194,8 @@ if dash_mode == "Live":
             title=f'{label} AI Signals',
             xaxis_title='Time', yaxis_title='Price',
             height=600,
-            plot_bgcolor=bg_color, paper_bgcolor=bg_color,
-            font=dict(color=text_color)
+            plot_bgcolor='#2e2e2e', paper_bgcolor='#2e2e2e',
+            font=dict(color='#ffffff')
         )
         st.plotly_chart(fig, use_container_width=True)
 
