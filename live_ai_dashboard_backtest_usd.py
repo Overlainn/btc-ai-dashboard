@@ -71,7 +71,7 @@ if time.time() - st.session_state.last_refresh > 60:
 # ========== Train ==========
 def train_model():
     exchange = ccxt.coinbase()
-    df = pd.DataFrame(exchange.fetch_ohlcv('BTC/USDT', '30m', limit=300),
+    df = pd.DataFrame(exchange.fetch_ohlcv('BTC/USDT', '30m', limit=750),
                       columns=['Timestamp', 'Open', 'High', 'Low', 'Close', 'Volume'])
     df['Timestamp'] = pd.to_datetime(df['Timestamp'], unit='ms')
     df.set_index('Timestamp', inplace=True)
