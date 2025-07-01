@@ -232,7 +232,6 @@ elif mode == "Backtest":
 
     for i in range(1, len(df)):
         row = df.iloc[i]
-        prev = df.iloc[i - 1]
 
         if in_position is None:
             if row['Prediction'] == 2 and row['S2'] > 0.6:
@@ -259,41 +258,46 @@ elif mode == "Backtest":
             if exit_reason:
                 exit_price = row['Close']
                 pnl = exit_price - entry_price if in_position == "LONG" else entry_price - exit_price
+                pct = (pnl / entry_price) * 100
                 trades.append({
                     "Entry Time": entry_time,
                     "Exit Time": row.name,
                     "Direction": in_position,
                     "Entry Price": entry_price,
                     "Exit Price": exit_price,
-                    "PNL": round(pnl, 2),
+                    "PNL (USD)": round(pnl, 2),
+                    "Profit %": round(pct, 2),
                     "Reason": exit_reason
                 })
                 in_position = None
 
     df_trades = pd.DataFrame(trades)
 
-    # 📈 Plotting the trades on the chart
+    # 📈 Plotting with entry/exit markers
     fig = go.Figure()
     fig.add_trace(go.Scatter(x=df.index, y=df['Close'], name='Price', line=dict(color='lightblue')))
     for trade in trades:
-        color = 'green' if trade['PNL'] > 0 else 'red'
+        color = 'green' if trade['Direction'] == 'LONG' else 'red'
         fig.add_trace(go.Scatter(
             x=[trade["Entry Time"]], y=[trade["Entry Price"]],
             mode='markers', marker=dict(color=color, symbol='triangle-up', size=10),
-            name='Entry'
+            name=f'{trade["Direction"]} Entry'
         ))
         fig.add_trace(go.Scatter(
             x=[trade["Exit Time"]], y=[trade["Exit Price"]],
             mode='markers', marker=dict(color=color, symbol='x', size=10),
-            name='Exit'
+            name=f'{trade["Direction"]} Exit'
         ))
-    fig.update_layout(height=600, title="Backtest Chart with Entries/Exits")
+    fig.update_layout(height=600, title="Backtest Chart with Trades")
     st.plotly_chart(fig, use_container_width=True)
 
-    # 🧾 Styled Trade Log
+    # 🧾 Styled trade log
     st.subheader("🧪 Backtest — Signal-Based Trade Log")
 
     def pnl_color(val):
         return f'color: {"green" if val > 0 else "red"}'
 
-    st.dataframe(df_trades.style.applymap(pnl_color, subset=['PNL']))
+    if not df_trades.empty:
+        st.dataframe(df_trades.style.applymap(pnl_color, subset=['PNL (USD)', 'Profit %']))
+    else:
+        st.warning("No trades detected during this backtest.")
