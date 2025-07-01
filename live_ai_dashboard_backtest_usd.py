@@ -257,52 +257,43 @@ elif mode == "Backtest":
                     exit_reason = "Confidence Drop"
 
             if exit_reason:
+                exit_price = row['Close']
+                pnl = exit_price - entry_price if in_position == "LONG" else entry_price - exit_price
                 trades.append({
                     "Entry Time": entry_time,
                     "Exit Time": row.name,
                     "Direction": in_position,
                     "Entry Price": entry_price,
-                    "Exit Price": row['Close'],
-                    "PNL": row['Close'] - entry_price if in_position == "LONG" else entry_price - row['Close'],
+                    "Exit Price": exit_price,
+                    "PNL": round(pnl, 2),
                     "Reason": exit_reason
                 })
                 in_position = None
 
+    df_trades = pd.DataFrame(trades)
+
+    # 📈 Plotting the trades on the chart
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(x=df.index, y=df['Close'], name='Price', line=dict(color='lightblue')))
+    for trade in trades:
+        color = 'green' if trade['PNL'] > 0 else 'red'
+        fig.add_trace(go.Scatter(
+            x=[trade["Entry Time"]], y=[trade["Entry Price"]],
+            mode='markers', marker=dict(color=color, symbol='triangle-up', size=10),
+            name='Entry'
+        ))
+        fig.add_trace(go.Scatter(
+            x=[trade["Exit Time"]], y=[trade["Exit Price"]],
+            mode='markers', marker=dict(color=color, symbol='x', size=10),
+            name='Exit'
+        ))
+    fig.update_layout(height=600, title="Backtest Chart with Entries/Exits")
+    st.plotly_chart(fig, use_container_width=True)
+
+    # 🧾 Styled Trade Log
     st.subheader("🧪 Backtest — Signal-Based Trade Log")
-    
-    if trades:
-        df_trades = pd.DataFrame(trades)
-        df_trades['PNL Color'] = df_trades['PNL'].apply(lambda x: 'color: green' if x > 0 else 'color: red')
-        st.dataframe(df_trades.style.apply(lambda x: df_trades['PNL Color'], axis=1, subset=['PNL']))
 
-        # Plot chart with trade markers
-        fig = go.Figure()
-        fig.add_trace(go.Scatter(x=df.index, y=df['Close'], name="Close"))
+    def pnl_color(val):
+        return f'color: {"green" if val > 0 else "red"}'
 
-        for trade in trades:
-            entry_color = 'green' if trade['Direction'] == 'LONG' else 'red'
-            exit_color = 'gray'
-
-            fig.add_trace(go.Scatter(
-                x=[trade['Entry Time']], y=[trade['Entry Price']],
-                mode='markers+text', name='Entry',
-                marker=dict(color=entry_color, size=10),
-                text=[f"{trade['Direction']} Entry"],
-                textposition='top center'))
-
-            fig.add_trace(go.Scatter(
-                x=[trade['Exit Time']], y=[trade['Exit Price']],
-                mode='markers+text', name='Exit',
-                marker=dict(color=exit_color, size=10),
-                text=["Exit"],
-                textposition='bottom center'))
-
-        fig.update_layout(title="📈 BTC Price with Trade Markers", height=600)
-        st.plotly_chart(fig, use_container_width=True)
-
-        # Optional performance summary
-        st.markdown(f"**Total Trades:** {len(df_trades)}")
-        st.markdown(f"**Win Rate:** {100 * (df_trades['PNL'] > 0).mean():.1f}%")
-        st.markdown(f"**Total PnL:** {df_trades['PNL'].sum():.2f}")
-    else:
-        st.info("No trades triggered in backtest.")
+    st.dataframe(df_trades.style.applymap(pnl_color, subset=['PNL']))
