@@ -137,7 +137,7 @@ if not os.path.exists(logfile):
     pd.DataFrame(columns=["Timestamp", "Price", "Signal", "Scores"]).to_csv(logfile, index=False)
 
 def get_data():
-    df = pd.DataFrame(exchange.fetch_ohlcv('BTC/USDT', '30m', limit=200),
+    df = pd.DataFrame(exchange.fetch_ohlcv('BTC/USDT', '30m', limit=750),
                       columns=['Timestamp', 'Open', 'High', 'Low', 'Close', 'Volume'])
     df['Timestamp'] = pd.to_datetime(df['Timestamp'], unit='ms').dt.tz_localize('UTC').dt.tz_convert(est)
     df.set_index('Timestamp', inplace=True)
