@@ -169,17 +169,44 @@ if mode == "Live":
     price = df['Close'].iloc[-1]
     pred = df['Prediction'].iloc[-1]
     conf = max(df['S0'].iloc[-1], df['S2'].iloc[-1])
-    last_sig = st.session_state.get('last_btc_signal')
+    t = df.index[-1].strftime("%Y-%m-%d %H:%M")
 
-    if pred in [0, 2] and conf >= 0.6 and pred != last_sig:
-        st.session_state['last_btc_signal'] = pred
-        name = "📈 LONG" if pred == 2 else "📉 SHORT"
-        t = df.index[-1].strftime("%Y-%m-%d %H:%M")
-        msg = f"BTC {name} | {t} | ${price:.2f} | S0:{df['S0'].iloc[-1]:.2f}, S2:{df['S2'].iloc[-1]:.2f}"
-        send_push_notification(msg)
-        pd.DataFrame([{"Timestamp": t, "Price": price, "Signal": name,
-                       "Scores": f"{df['S0'].iloc[-1]:.2f},{df['S2'].iloc[-1]:.2f}"}]).to_csv(logfile, mode='a', header=False, index=False)
+    # Initialize session state
+    if 'open_trade' not in st.session_state:
+        st.session_state['open_trade'] = None
 
+    trade = st.session_state['open_trade']
+
+    # Entry logic
+    if pred in [0, 2] and conf >= 0.6:
+        if not trade:
+            signal_name = "LONG" if pred == 2 else "SHORT"
+            st.session_state['open_trade'] = {
+                "signal": pred,
+                "entry_price": price,
+                "entry_time": t,
+                "entry_conf": conf
+            }
+            msg = f"BTC 📥 ENTRY — {signal_name} | {t} | ${price:.2f} | Conf: {conf:.2f}"
+            send_push_notification(msg)
+            pd.DataFrame([{"Timestamp": t, "Price": price, "Signal": f"ENTRY {signal_name}", "Scores": f"{conf:.2f}"}]).to_csv(logfile, mode='a', header=False, index=False)
+
+    # Exit logic
+    elif trade:
+        reason = None
+        if pred != trade["signal"]:
+            reason = "Signal flipped"
+        elif conf < 0.6:
+            reason = "Confidence dropped"
+
+        if reason:
+            signal_name = "LONG" if trade["signal"] == 2 else "SHORT"
+            msg = f"BTC ❌ EXIT — {signal_name} | {t} | ${price:.2f} | Reason: {reason}"
+            send_push_notification(msg)
+            pd.DataFrame([{"Timestamp": t, "Price": price, "Signal": f"EXIT {signal_name}", "Scores": reason}]).to_csv(logfile, mode='a', header=False, index=False)
+            st.session_state['open_trade'] = None
+
+    # Plot + Display
     st.subheader(f"📊 BTC Live — Current: ${price:.2f}")
     fig = go.Figure()
     fig.add_trace(go.Scatter(x=df.index, y=df['Close'], name="Close"))
@@ -189,7 +216,9 @@ if mode == "Live":
     df_long = df[(df['Prediction'] == 2) & (df['S2'] > 0.6)]
     df_short = df[(df['Prediction'] == 0) & (df['S0'] > 0.6)]
     fig.add_trace(go.Scatter(x=df_long.index, y=df_long['Close'], mode='markers', name='📈 Long', marker=dict(color='green')))
+
     fig.add_trace(go.Scatter(x=df_short.index, y=df_short['Close'], mode='markers', name='📉 Short', marker=dict(color='red')))
+
     fig.update_layout(height=600)
     st.plotly_chart(fig, use_container_width=True)
     st.dataframe(pd.read_csv(logfile).tail(10))
