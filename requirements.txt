@@ -2,7 +2,6 @@ streamlit
 ccxt
 ta
 pandas
-scikit-learn
 plotly
 PyDrive2
 joblib
@@ -10,4 +9,5 @@ gdown
 google-auth
 google-auth-oauthlib
 google-api-python-client
-imbalanced-learn
+scikit-learn==1.3.2
+imbalanced-learn==0.11.0
