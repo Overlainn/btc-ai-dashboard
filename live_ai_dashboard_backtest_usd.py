@@ -222,3 +222,51 @@ if mode == "Live":
     fig.update_layout(height=600)
     st.plotly_chart(fig, use_container_width=True)
     st.dataframe(pd.read_csv(logfile).tail(10))
+
+elif mode == "Backtest":
+    df = get_data()
+    trades = []
+    in_position = None
+    entry_time = None
+    entry_price = None
+
+    for i in range(1, len(df)):
+        row = df.iloc[i]
+        prev = df.iloc[i - 1]
+
+        if in_position is None:
+            if row['Prediction'] == 2 and row['S2'] > 0.6:
+                in_position = "LONG"
+                entry_time = row.name
+                entry_price = row['Close']
+            elif row['Prediction'] == 0 and row['S0'] > 0.6:
+                in_position = "SHORT"
+                entry_time = row.name
+                entry_price = row['Close']
+        else:
+            exit_reason = None
+            if in_position == "LONG":
+                if row['Prediction'] != 2:
+                    exit_reason = "Signal Flip"
+                elif row['S2'] < 0.6:
+                    exit_reason = "Confidence Drop"
+            elif in_position == "SHORT":
+                if row['Prediction'] != 0:
+                    exit_reason = "Signal Flip"
+                elif row['S0'] < 0.6:
+                    exit_reason = "Confidence Drop"
+
+            if exit_reason:
+                trades.append({
+                    "Entry Time": entry_time,
+                    "Exit Time": row.name,
+                    "Direction": in_position,
+                    "Entry Price": entry_price,
+                    "Exit Price": row['Close'],
+                    "PNL": row['Close'] - entry_price if in_position == "LONG" else entry_price - row['Close'],
+                    "Reason": exit_reason
+                })
+                in_position = None
+
+    st.subheader("🧪 Backtest — Signal-Based Trade Log")
+    st.dataframe(pd.DataFrame(trades))
