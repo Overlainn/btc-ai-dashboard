@@ -273,7 +273,7 @@ elif mode == "Backtest":
                 })
                 in_position = None
 
-  df_trades = pd.DataFrame(trades)
+    df_trades = pd.DataFrame(trades)
 
     # 📈 Plotting
     fig = go.Figure()
