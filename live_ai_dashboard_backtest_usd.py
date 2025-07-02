@@ -255,21 +255,45 @@ elif mode == "Backtest":
                 elif row['S0'] < 0.6:
                     exit_reason = "Confidence Drop"
 
-            if exit_reason:
-                exit_price = row['Close']
-                pnl = exit_price - entry_price if in_position == "LONG" else entry_price - exit_price
-                pct = (pnl / entry_price) * 100
-                trades.append({
-                    "Entry Time": entry_time,
-                    "Exit Time": row.name,
-                    "Direction": in_position,
-                    "Entry Price": entry_price,
-                    "Exit Price": exit_price,
-                    "PNL (USD)": round(pnl, 2),
-                    "Profit %": round(pct, 2),
-                    "Reason": exit_reason
-                })
-                in_position = None
+for i in range(1, len(df)):
+    row = df.iloc[i]
+    prev = df.iloc[i - 1]
+
+    if in_position is None:
+        # Entry logic
+        if row['Prediction'] == 2 and row['S2'] > 0.6:
+            in_position = "LONG"
+            entry_time = row.name
+            entry_price = row['Close']
+        elif row['Prediction'] == 0 and row['S0'] > 0.6:
+            in_position = "SHORT"
+            entry_time = row.name
+            entry_price = row['Close']
+
+    else:
+        # Exit on first signal flip
+        signal_flip = (
+            (in_position == "LONG" and row['Prediction'] == 0 and row['S0'] > 0.6) or
+            (in_position == "SHORT" and row['Prediction'] == 2 and row['S2'] > 0.6)
+        )
+        confidence_drop = (
+            (in_position == "LONG" and row['S2'] < 0.6) or
+            (in_position == "SHORT" and row['S0'] < 0.6)
+        )
+
+        if signal_flip or confidence_drop:
+            trades.append({
+                "Entry Time": entry_time,
+                "Exit Time": row.name,
+                "Direction": in_position,
+                "Entry Price": entry_price,
+                "Exit Price": row['Close'],
+                "PNL": row['Close'] - entry_price if in_position == "LONG" else entry_price - row['Close'],
+                "Profit %": (row['Close'] / entry_price - 1) * 100 if in_position == "LONG"
+                            else (entry_price / row['Close'] - 1) * 100,
+                "Reason": "Signal Flip" if signal_flip else "Confidence Drop"
+            })
+            in_position = None
 
     df_trades = pd.DataFrame(trades)
 
