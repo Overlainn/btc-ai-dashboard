@@ -233,8 +233,8 @@ elif mode == "Backtest":
     for i in range(1, len(df)):
         row = df.iloc[i]
 
+        # Entry logic
         if in_position is None:
-            # Entry logic
             if row['Prediction'] == 2 and row['S2'] > 0.6:
                 in_position = "LONG"
                 entry_time = row.name
@@ -244,32 +244,34 @@ elif mode == "Backtest":
                 entry_time = row.name
                 entry_price = row['Close']
 
-        else:
-            # Exit on *first* opposite signal or confidence drop
-            signal_flip = (
-                (in_position == "LONG" and row['Prediction'] == 0 and row['S0'] > 0.6) or
-                (in_position == "SHORT" and row['Prediction'] == 2 and row['S2'] > 0.6)
-            )
-            confidence_drop = (
-                (in_position == "LONG" and row['S2'] < 0.6) or
-                (in_position == "SHORT" and row['S0'] < 0.6)
-            )
-
-            if signal_flip or confidence_drop:
+        # Exit logic: only on opposite signal
+        elif in_position == "LONG":
+            if row['Prediction'] == 0 and row['S0'] > 0.6:
                 trades.append({
                     "Entry Time": entry_time,
                     "Exit Time": row.name,
                     "Direction": in_position,
                     "Entry Price": entry_price,
                     "Exit Price": row['Close'],
-                    "PNL (USD)": row['Close'] - entry_price if in_position == "LONG" else entry_price - row['Close'],
-                    "Profit %": (row['Close'] / entry_price - 1) * 100 if in_position == "LONG"
-                                else (entry_price / row['Close'] - 1) * 100,
-                    "Reason": "Signal Flip" if signal_flip else "Confidence Drop"
+                    "PNL (USD)": row['Close'] - entry_price,
+                    "Profit %": (row['Close'] / entry_price - 1) * 100,
+                    "Reason": "Opposite Signal"
                 })
                 in_position = None
 
-    df_trades = pd.DataFrame(trades)
+        elif in_position == "SHORT":
+            if row['Prediction'] == 2 and row['S2'] > 0.6:
+                trades.append({
+                    "Entry Time": entry_time,
+                    "Exit Time": row.name,
+                    "Direction": in_position,
+                    "Entry Price": entry_price,
+                    "Exit Price": row['Close'],
+                    "PNL (USD)": entry_price - row['Close'],
+                    "Profit %": (entry_price / row['Close'] - 1) * 100,
+                    "Reason": "Opposite Signal"
+                })
+                in_position = None
 
     # 📈 Plotting
     fig = go.Figure()
