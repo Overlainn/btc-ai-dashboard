@@ -273,6 +273,8 @@ elif mode == "Backtest":
                 })
                 in_position = None
 
+  df_trades = pd.DataFrame(trades)
+
     # 📈 Plotting
     fig = go.Figure()
     fig.add_trace(go.Scatter(x=df.index, y=df['Close'], name='Price', line=dict(color='lightblue')))
