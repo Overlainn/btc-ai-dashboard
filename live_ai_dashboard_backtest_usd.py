@@ -221,7 +221,14 @@ if mode == "Live":
 
     fig.update_layout(height=600)
     st.plotly_chart(fig, use_container_width=True)
-    st.dataframe(pd.read_csv(logfile).tail(10))
+    try:
+        signal_df = pd.read_csv(logfile)
+        signal_df['Timestamp'] = pd.to_datetime(signal_df['Timestamp'], errors='coerce')
+        signal_df = signal_df.sort_values(by="Timestamp", ascending=False)
+        st.subheader("📜 Signal Log — Last 45 Entries")
+        st.dataframe(signal_df.head(45), use_container_width=True)
+    except Exception as e:
+        st.error(f"❌ Failed to load signal log: {e}")
 
 elif mode == "Backtest":
     df = get_data()
