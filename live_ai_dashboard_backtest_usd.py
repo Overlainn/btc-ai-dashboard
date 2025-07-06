@@ -126,15 +126,24 @@ else:
     else:
         model, scaler = train_model()
 
+# ========== Log files ==========
+logfile = "btc_alert_log.csv"
+candle_logfile = "btc_candle_log.csv"
+
+# Initialize entry/exit log CSV if missing
+if not os.path.exists(logfile):
+    pd.DataFrame(columns=["Timestamp", "Price", "Signal", "Scores"]).to_csv(logfile, index=False)
+
+# Initialize candle log CSV if missing
+if not os.path.exists(candle_logfile):
+    pd.DataFrame(columns=["Timestamp", "Price", "Prediction", "Conf_Long", "Conf_Neutral", "Conf_Short"]).to_csv(candle_logfile, index=False)
+
 # ========== Streamlit UI ==========
 st.set_page_config(layout='wide')
 st.title("📈 BTC AI Dashboard + Daily Retrain")
 mode = st.radio("Mode", ["Live", "Backtest"], horizontal=True)
 est = pytz.timezone('US/Eastern')
 exchange = ccxt.coinbase()
-logfile = "btc_alert_log.csv"
-if not os.path.exists(logfile):
-    pd.DataFrame(columns=["Timestamp", "Price", "Signal", "Scores"]).to_csv(logfile, index=False)
 
 def get_data():
     df = pd.DataFrame(exchange.fetch_ohlcv('BTC/USDT', '30m', limit=1000),
@@ -170,6 +179,18 @@ if mode == "Live":
     pred = df['Prediction'].iloc[-1]
     conf = max(df['S0'].iloc[-1], df['S2'].iloc[-1])
     t = df.index[-1].strftime("%Y-%m-%d %H:%M")
+
+    # --- Log last candle prediction to candle_logfile ---
+    last_candle = df.iloc[-1:]
+    log_entry = pd.DataFrame({
+        "Timestamp": last_candle.index,
+        "Price": last_candle['Close'],
+        "Prediction": last_candle['Prediction'],
+        "Conf_Long": last_candle['S2'],
+        "Conf_Neutral": last_candle['S1'],
+        "Conf_Short": last_candle['S0']
+    })
+    log_entry.to_csv(candle_logfile, mode='a', header=False, index=False)
 
     # Initialize session state
     if 'open_trade' not in st.session_state:
@@ -216,11 +237,11 @@ if mode == "Live":
     df_long = df[(df['Prediction'] == 2) & (df['S2'] > 0.6)]
     df_short = df[(df['Prediction'] == 0) & (df['S0'] > 0.6)]
     fig.add_trace(go.Scatter(x=df_long.index, y=df_long['Close'], mode='markers', name='📈 Long', marker=dict(color='green')))
-
     fig.add_trace(go.Scatter(x=df_short.index, y=df_short['Close'], mode='markers', name='📉 Short', marker=dict(color='red')))
-
     fig.update_layout(height=600)
     st.plotly_chart(fig, use_container_width=True)
+
+    # Show entry/exit signal log
     try:
         signal_df = pd.read_csv(logfile)
         signal_df['Timestamp'] = pd.to_datetime(signal_df['Timestamp'], errors='coerce')
@@ -229,6 +250,16 @@ if mode == "Live":
         st.dataframe(signal_df.head(45), use_container_width=True)
     except Exception as e:
         st.error(f"❌ Failed to load signal log: {e}")
+
+    # Show candle prediction log
+    try:
+        candle_log_df = pd.read_csv(candle_logfile)
+        candle_log_df['Timestamp'] = pd.to_datetime(candle_log_df['Timestamp'])
+        candle_log_df = candle_log_df.sort_values(by='Timestamp', ascending=False)
+        st.subheader("🕯️ Candle Prediction Log — Last 50 Entries")
+        st.dataframe(candle_log_df.head(50), use_container_width=True)
+    except Exception as e:
+        st.error(f"❌ Failed to load candle log: {e}")
 
 elif mode == "Backtest":
     df = get_data()
