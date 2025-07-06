@@ -1,5 +1,6 @@
 # app.py
 import ccxt, pandas as pd, ta, time, streamlit as st, plotly.graph_objs as go
+from streamlit_autorefresh import st_autorefresh
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.preprocessing import StandardScaler
 import pytz, requests, os, pickle, io
@@ -140,6 +141,7 @@ if not os.path.exists(candle_logfile):
 
 # ========== Streamlit UI ==========
 st.set_page_config(layout='wide')
+count = st_autorefresh(interval=1800 * 1000, limit=None, key="auto_refresh")
 st.title("📈 BTC AI Dashboard + Daily Retrain")
 mode = st.radio("Mode", ["Live", "Backtest"], horizontal=True)
 est = pytz.timezone('US/Eastern')
