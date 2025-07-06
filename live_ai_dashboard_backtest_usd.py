@@ -201,7 +201,7 @@ if mode == "Live":
     trade = st.session_state['open_trade']
 
     # Entry logic
-    if pred in [0, 2] and conf >= 0.6:
+    if pred in [0, 2] and conf >= 0.54:
         if not trade:
             signal_name = "LONG" if pred == 2 else "SHORT"
             st.session_state['open_trade'] = {
@@ -219,7 +219,7 @@ if mode == "Live":
         reason = None
         if pred != trade["signal"]:
             reason = "Signal flipped"
-        elif conf < 0.6:
+        elif conf < 0.54:
             reason = "Confidence dropped"
 
         if reason:
@@ -236,8 +236,8 @@ if mode == "Live":
     fig.add_trace(go.Scatter(x=df.index, y=df['EMA9'], name="EMA9"))
     fig.add_trace(go.Scatter(x=df.index, y=df['EMA21'], name="EMA21"))
     fig.add_trace(go.Scatter(x=df.index, y=df['VWAP'], name="VWAP"))
-    df_long = df[(df['Prediction'] == 2) & (df['S2'] > 0.6)]
-    df_short = df[(df['Prediction'] == 0) & (df['S0'] > 0.6)]
+    df_long = df[(df['Prediction'] == 2) & (df['S2'] > 0.54)]
+    df_short = df[(df['Prediction'] == 0) & (df['S0'] > 0.54)]
     fig.add_trace(go.Scatter(x=df_long.index, y=df_long['Close'], mode='markers', name='📈 Long', marker=dict(color='green')))
     fig.add_trace(go.Scatter(x=df_short.index, y=df_short['Close'], mode='markers', name='📉 Short', marker=dict(color='red')))
     fig.update_layout(height=600)
@@ -275,18 +275,18 @@ elif mode == "Backtest":
 
         # Entry logic
         if in_position is None:
-            if row['Prediction'] == 2 and row['S2'] > 0.6:
+            if row['Prediction'] == 2 and row['S2'] > 0.54:
                 in_position = "LONG"
                 entry_time = row.name
                 entry_price = row['Close']
-            elif row['Prediction'] == 0 and row['S0'] > 0.6:
+            elif row['Prediction'] == 0 and row['S0'] > 0.54:
                 in_position = "SHORT"
                 entry_time = row.name
                 entry_price = row['Close']
 
         # Exit logic: only on opposite signal
         elif in_position == "LONG":
-            if row['Prediction'] == 0 and row['S0'] > 0.6:
+            if row['Prediction'] == 0 and row['S0'] > 0.54:
                 trades.append({
                     "Entry Time": entry_time,
                     "Exit Time": row.name,
@@ -300,7 +300,7 @@ elif mode == "Backtest":
                 in_position = None
 
         elif in_position == "SHORT":
-            if row['Prediction'] == 2 and row['S2'] > 0.6:
+            if row['Prediction'] == 2 and row['S2'] > 0.54:
                 trades.append({
                     "Entry Time": entry_time,
                     "Exit Time": row.name,
