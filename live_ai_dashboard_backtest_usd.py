@@ -4,7 +4,7 @@ from streamlit_autorefresh import st_autorefresh
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.preprocessing import StandardScaler
 import pytz, requests, os, pickle, io
-from datetime import datetime, date
+from datetime import datetime, date, timedelta
 from google.oauth2 import service_account
 from streamlit_autorefresh import st_autorefresh
 from googleapiclient.discovery import build
