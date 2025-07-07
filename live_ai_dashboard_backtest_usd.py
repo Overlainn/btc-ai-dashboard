@@ -6,6 +6,7 @@ from sklearn.preprocessing import StandardScaler
 import pytz, requests, os, pickle, io
 from datetime import datetime, date
 from google.oauth2 import service_account
+from streamlit_autorefresh import st_autorefresh
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseDownload, MediaFileUpload, MediaIoBaseUpload
 
@@ -156,7 +157,6 @@ if not os.path.exists(candle_logfile):
 
 # ========== Streamlit UI ==========
 st.set_page_config(layout='wide')
-count = st_autorefresh(interval=1800 * 1000, limit=None, key="auto_refresh")
 st.title("📈 BTC AI Dashboard + Daily Retrain")
 mode = st.radio("Mode", ["Live", "Backtest"], horizontal=True)
 est = pytz.timezone('US/Eastern')
@@ -191,6 +191,10 @@ def get_data():
     return df
 
 if mode == "Live":
+
+    from streamlit_autorefresh import st_autorefresh
+    st_autorefresh(interval=1800000, limit=None, key="live_refresh")
+
     df = get_data()
     price = df['Close'].iloc[-1]
     pred = df['Prediction'].iloc[-1]
