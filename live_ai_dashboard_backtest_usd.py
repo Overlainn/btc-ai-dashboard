@@ -18,6 +18,7 @@ creds = service_account.Credentials.from_service_account_info(SERVICE_ACCOUNT_IN
 drive_service = build('drive', 'v3', credentials=creds)
 
 MODEL_FILE = "btc_model.pkl"
+RETRAIN_INTERVAL = timedelta(hours=12)
 LAST_TRAIN_FILE = "last_train.txt"
 FOLDER_NAME = "StreamlitAI"
 
