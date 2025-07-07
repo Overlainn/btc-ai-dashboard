@@ -39,6 +39,20 @@ def upload_to_drive(filename):
         drive_service.files().delete(fileId=existing[0]['id']).execute()
     drive_service.files().create(body=file_metadata, media_body=media).execute()
 
+def upload_df_to_drive(df, filename):
+    folder_id = get_folder_id()
+    csv_bytes = df.to_csv(index=False).encode('utf-8')
+    media = MediaIoBaseUpload(io.BytesIO(csv_bytes), mimetype='text/csv')
+    file_metadata = {'name': filename, 'parents': [folder_id]}
+
+    # Delete existing file if any
+    existing = drive_service.files().list(q=f"name='{filename}' and '{folder_id}' in parents",
+                                          fields='files(id)').execute().get('files', [])
+    if existing:
+        drive_service.files().delete(fileId=existing[0]['id']).execute()
+
+    drive_service.files().create(body=file_metadata, media_body=media).execute()
+
 def download_from_drive(filename):
     folder_id = get_folder_id()
     results = drive_service.files().list(q=f"name='{filename}' and '{folder_id}' in parents",
@@ -314,6 +328,11 @@ elif mode == "Backtest":
                 in_position = None
 
     df_trades = pd.DataFrame(trades)
+
+    # Save trades log to Google Drive
+    if not df_trades.empty:
+        upload_df_to_drive(df_trades, "backtest_trades_log.csv")
+        st.success("✅ Backtest trades log uploaded to Google Drive!")
 
     # 📈 Plotting
     fig = go.Figure()
