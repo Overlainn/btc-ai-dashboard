@@ -262,6 +262,19 @@ if mode == "Live":
     fig.update_layout(height=600)
     st.plotly_chart(fig, use_container_width=True)
 
+    st.subheader("📊 Signal Log (Current Model Predictions)")
+    st.dataframe(signal_df, use_container_width=True)
+    now_est = datetime.now(est)
+    st.write("⏰ Last refreshed:", now_est.strftime("%H:%M:%S"))
+    st.markdown("---")
+    if st.button("🔁 Force Retrain", type="primary"):
+        with st.spinner("Retraining model..."):
+            model, scaler = train_model()
+            st.session_state.model = model
+            st.session_state.scaler = scaler
+            st.success("✅ Model retrained successfully.")
+            st.rerun()
+
     # Show entry/exit signal log
     try:
         signal_df = pd.read_csv(logfile)
