@@ -193,7 +193,7 @@ def get_data():
 if mode == "Live":
 
     from streamlit_autorefresh import st_autorefresh
-    st_autorefresh(interval=1800000, limit=None, key="live_refresh")
+    st_autorefresh(interval=900000, limit=None, key="live_refresh")
 
     df = get_data()
     price = df['Close'].iloc[-1]
