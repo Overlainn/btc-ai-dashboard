@@ -268,6 +268,9 @@ if mode == "Live":
         signal_df['Timestamp'] = pd.to_datetime(signal_df['Timestamp'], errors='coerce')
         signal_df = signal_df.sort_values(by="Timestamp", ascending=False)
         st.subheader("📜 Signal Log — Last 45 Entries")
+        now_est = datetime.now(est)
+        st.write("⏰ Last refreshed:", now_est.strftime("%H:%M:%S"))
+        st.markdown("---")
         st.dataframe(signal_df.head(45), use_container_width=True)
     except Exception as e:
         st.error(f"❌ Failed to load signal log: {e}")
@@ -282,11 +285,6 @@ if mode == "Live":
     except Exception as e:
         st.error(f"❌ Failed to load candle log: {e}")
 
-    st.subheader("📊 Signal Log (Current Model Predictions)")
-    st.dataframe(signal_df, use_container_width=True)
-    now_est = datetime.now(est)
-    st.write("⏰ Last refreshed:", now_est.strftime("%H:%M:%S"))
-    st.markdown("---")
     if st.button("🔁 Force Retrain", type="primary"):
         with st.spinner("Retraining model..."):
             model, scaler = train_model()
